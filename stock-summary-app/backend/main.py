@@ -99,11 +99,135 @@ MAJOR_SOURCES = {
     "아시아경제",
 }
 
+# 뉴스 신뢰도 필터(홍보성 기사 제외 / 검증 가능한 근거 위주)
+ACADEMIC_SOURCES = {
+    "nature",
+    "science",
+    "cell",
+    "lancet",
+    "nejm",
+    "new england journal of medicine",
+    "arxiv",
+    "ieee",
+    "acm",
+    "ssrn",
+    "pubmed",
+}
+
+# 경영실적/가이던스/IR(공식 발표)처럼 "1차 자료에 가까운" 출처를 우선
+OFFICIAL_IR_SOURCES = {
+    "sec.gov",
+    "prnewswire",
+    "globenewswire",
+    "businesswire",
+    "business wire",
+    "reuters",
+    "bloomberg",
+    "financial times",
+    "ft",
+    "cnbc",
+    "yahoo finance",
+    "marketwatch",
+}
+
+EARNINGS_KEYWORDS_KR = [
+    "실적",
+    "매출",
+    "영업이익",
+    "순이익",
+    "잠정",
+    "실적발표",
+    "가이던스",
+    "전망",
+    "컨퍼런스콜",
+    "ir",
+    "투자설명회",
+]
+
+EARNINGS_KEYWORDS_US = [
+    "earnings",
+    "revenue",
+    "guidance",
+    "quarter",
+    "results",
+    "conference call",
+    "investor",
+    "press release",
+    "sec",
+]
+
+TECH_PROOF_KEYWORDS = [
+    "study",
+    "research",
+    "paper",
+    "published",
+    "clinical",
+    "trial",
+    "randomized",
+    "peer-reviewed",
+    "phase 1",
+    "phase 2",
+    "breakthrough",
+    "validated",
+    "benchmark",
+    "evidence",
+]
+
+MARKETING_KEYWORDS = [
+    "launch",
+    "unveils",
+    "announces",
+    "partnership",
+    "signs",
+    "strategic cooperation",
+    "memorandum",
+    "excited to",
+]
+
+
+def _news_classify(source: str, title_raw: str, market: Market) -> Dict[str, Any]:
+    source_l = (source or "").lower()
+    title_l = (title_raw or "").lower()
+
+    score = 0
+    tags: List[str] = []
+
+    # 학술/논문 성격
+    if any(a in source_l for a in ACADEMIC_SOURCES) or any(a in title_l for a in ACADEMIC_SOURCES):
+        score += 5
+        tags.append("학술/논문 성격")
+
+    # IR/공식 발표 성격
+    if any(o in source_l for o in OFFICIAL_IR_SOURCES):
+        score += 3
+        tags.append("공신력 출처(보도/IR)")
+
+    # 기술/연구 검증 키워드
+    if any(k in title_l for k in TECH_PROOF_KEYWORDS):
+        score += 4
+        tags.append("검증/연구 키워드")
+
+    # 실적/가이던스/컨콜 키워드
+    earnings_keywords = EARNINGS_KEYWORDS_KR if market == "KR" else EARNINGS_KEYWORDS_US
+    if any(k in title_l for k in earnings_keywords):
+        score += 5
+        tags.append("실적/가이던스/컨콜")
+
+    # 홍보성 키워드 감점(완전한 제외가 아니라, 신뢰도 낮추는 용도)
+    if any(m in title_l for m in MARKETING_KEYWORDS):
+        score -= 3
+        tags.append("홍보성 가능성(감점)")
+
+    # 기준 통과: 신뢰도 높은 키워드가 충분히 묶일 때만 기본 승인
+    # 단, 실적/가이던스/컨콜 키워드는 1차 성격이 강해 예외적으로 더 넓게 허용
+    accepted = (score >= 7) or ("실적/가이던스/컨콜" in tags)
+    return {"score": score, "tags": tags, "accepted": accepted}
+
 _translator = Translator() if Translator is not None else None
 NEWS_CACHE_TTL_SECONDS = 600
 REPORT_CACHE_TTL_SECONDS = 600
 MOVES_CACHE_TTL_SECONDS = 60
-_news_cache: Dict[Tuple[Market, str], Tuple[float, List[Dict[str, str]]]] = {}
+_news_cache: Dict[Tuple[Market, str], Tuple[float, Dict[str, Any]]] = {}
 _moves_cache: Dict[Market, Tuple[float, List[Move]]] = {}
 _report_cache: Dict[Market, Tuple[float, Dict[str, Any]]] = {}
 
@@ -221,7 +345,7 @@ def _translate_to_ko(text: str) -> str:
         return text
 
 
-def _fetch_news_for_stock(m: Move, market: Market, limit: int = 3) -> List[Dict[str, str]]:
+def _fetch_news_for_stock(m: Move, market: Market, limit: int = 3) -> Dict[str, Any]:
     cache_key = (market, m.ticker)
     now = time.time()
     cached = _news_cache.get(cache_key)
@@ -241,93 +365,170 @@ def _fetch_news_for_stock(m: Move, market: Market, limit: int = 3) -> List[Dict[
             res = client.get(url)
             res.raise_for_status()
     except Exception:
-        return []
+        empty = {"items": [], "meta": {"total": 0, "accepted_total": 0, "rejected_total": 0, "used_fallback": False}}
+        _news_cache[cache_key] = (now, empty)
+        return empty
 
     try:
         root = ET.fromstring(res.text)
     except Exception:
-        return []
+        empty = {"items": [], "meta": {"total": 0, "accepted_total": 0, "rejected_total": 0, "used_fallback": False}}
+        _news_cache[cache_key] = (now, empty)
+        return empty
 
-    headlines: List[Dict[str, str]] = []
-    fallback: List[Dict[str, str]] = []
+    candidates: List[Dict[str, Any]] = []
+    total = 0
+    accepted_total = 0
+    rejected_total = 0
+
     for item in root.findall("./channel/item"):
         raw_title = (item.findtext("title") or "").strip()
         if not raw_title:
             continue
         raw_link = (item.findtext("link") or "").strip()
         parts = raw_title.rsplit(" - ", 1)
-        title = unescape(parts[0].strip())
+        title_raw = unescape(parts[0].strip())
         source = unescape(parts[1].strip()) if len(parts) > 1 else "Unknown"
 
-        source_l = source.lower()
-        if any(key in source_l for key in MAJOR_SOURCES):
-            headlines.append({"source": source, "title_raw": title, "url": raw_link})
+        cls = _news_classify(source, title_raw, market)
+        accepted = bool(cls.get("accepted"))
+        score = int(cls.get("score", 0))
+        tags = cls.get("tags", [])
+
+        candidates.append(
+            {
+                "source": source,
+                "title_raw": title_raw,
+                "url": raw_link,
+                "accepted": accepted,
+                "score": score,
+                "tags": tags,
+            }
+        )
+        total += 1
+        if accepted:
+            accepted_total += 1
         else:
-            fallback.append({"source": source, "title_raw": title, "url": raw_link})
+            rejected_total += 1
 
-        if len(headlines) >= limit:
-            break
+    accepted_items = [c for c in candidates if c["accepted"]]
+    used_fallback = False
 
-    picked = headlines if headlines else fallback[:limit]
-    translated: List[Dict[str, str]] = []
+    if accepted_items:
+        picked = sorted(accepted_items, key=lambda x: x["score"], reverse=True)[:limit]
+    else:
+        # 홍보성 가능성이 있는 항목은 최후까지 제외(요청사항 반영)
+        non_marketing = [
+            c
+            for c in candidates
+            if "홍보성 가능성(감점)" not in c.get("tags", [])
+            and c.get("score", 0) >= 0
+        ]
+        if non_marketing:
+            used_fallback = True
+            picked = sorted(non_marketing, key=lambda x: x.get("score", 0), reverse=True)[:limit]
+        else:
+            picked = []
+
+    translated: List[Dict[str, Any]] = []
     for p in picked:
         title_ko = _translate_to_ko(p.get("title_raw") or "")
-        translated.append({"source": p["source"], "title_ko": title_ko, "url": p.get("url") or ""})
-    _news_cache[cache_key] = (now, translated)  # type: ignore[arg-type]
-    return translated
+        translated.append(
+            {
+                "source": p["source"],
+                "title_ko": title_ko,
+                "url": p.get("url") or "",
+                "score": p.get("score", 0),
+                "tags": p.get("tags", []),
+                "accepted": p.get("accepted", False),
+            }
+        )
+
+    result = {
+        "items": translated,
+        "meta": {
+            "total": total,
+            "accepted_total": accepted_total,
+            "rejected_total": rejected_total,
+            "used_fallback": used_fallback,
+            "picked_count": len(translated),
+        },
+    }
+    _news_cache[cache_key] = (now, result)
+    return result
 
 
 def _reason_ko(m: Move, market: Market) -> Dict[str, object]:
     market_name = "국내" if market == "KR" else "미국"
-    headlines_detailed = _fetch_news_for_stock(m, market)
+    news_result = _fetch_news_for_stock(m, market)
+    headlines_detailed = news_result.get("items", [])
+    meta = news_result.get("meta", {}) or {}
     headlines_ko = [f"[출처: {h['source']}] {h['title_ko']}" for h in headlines_detailed]
     is_up = m.change_pct > 0
+
+    total = int(meta.get("total", 0) or 0)
+    accepted_total = int(meta.get("accepted_total", 0) or 0)
+    rejected_total = int(meta.get("rejected_total", 0) or 0)
+    used_fallback = bool(meta.get("used_fallback", False))
+
+    filter_note = (
+        f"검증 결과: 전체 {total}개 후보 중 공신력 기준 통과 {accepted_total}개, 제외 {rejected_total}개. "
+        f"{'대체 기준을 사용했습니다(통과 항목이 부족)' if used_fallback else '통과 항목 위주로 사용했습니다'}.\n"
+        "검증 기준(요약): "
+        "학술/논문 성격 키워드 또는 검증(논문/연구/peer-reviewed) 키워드, "
+        "IR/실적·가이던스(공식 발표) 성격 키워드를 우선 반영하고, "
+        "‘홍보성’ 가능성이 높은 표현은 감점/제외합니다.\n"
+        "아래 기사들은 클릭해서 원문 내용을 직접 확인할 수 있습니다.\n"
+        "용어해설: 수급(사람들이 주식을 사는/파는 흐름), 가이던스(회사가 앞으로의 실적을 제시하는 범위/전망), "
+        "IR(Investor Relations: 투자자 대상 공식 공지)."
+    )
+
     if headlines_detailed:
         topic = "; ".join([h["title_ko"] for h in headlines_detailed[:2]])
         if is_up:
             summary_ko = (
                 f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 상승했습니다. "
-                f"관련 뉴스에서 확인되는 핵심 포인트는 {topic} 입니다."
+                f"관련(통과된) 뉴스 핵심 포인트는 {topic} 입니다."
             )
             details_ko = (
-                f"상승한 이유(추정)는 두 가지가 동시에 맞물린 경우가 많습니다. "
-                f"(1) 헤드라인({headlines_detailed[0]['title_ko']})이 시장 기대를 높였고, "
-                f"(2) 그 뒤로 수급(주식을 사는 사람/파는 사람의 흐름)이 그 기대를 가격에 반영했기 때문입니다.\n"
-                f"아래 기사들을 클릭해서 실제로 어떤 내용이 나왔는지 확인해 보세요."
+                "상승한 이유(추정)는 보통 '기대(기사)' + '수급 반응(사람들의 매수/매도)'이 동시에 나타날 때입니다.\n"
+                f"(1) 기사/근거: {headlines_detailed[0]['title_ko']}\n"
+                "(2) 수급: 좋은 소식이 나오면 투자자들이 먼저 사고(매수), 가격이 끌어올려지는 경향이 있습니다.\n"
+                f"{filter_note}"
             )
         else:
             summary_ko = (
                 f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 하락했습니다. "
-                f"관련 뉴스에서 확인되는 핵심 포인트는 {topic} 입니다."
+                f"관련(통과된) 뉴스 핵심 포인트는 {topic} 입니다."
             )
             details_ko = (
-                f"하락한 이유(추정)는 보통 기대가 꺾이거나 불확실성이 커질 때 나타납니다. "
-                f"(1) 헤드라인({headlines_detailed[0]['title_ko']})이 ‘좋아야 할 것’에 대한 의문을 만들었고, "
-                f"(2) 이후 수급(매수/매도)이 기대를 되돌려 버리면서 가격이 빠르게 조정됐을 가능성이 있습니다.\n"
-                f"아래 기사들을 클릭해서 실제로 어떤 내용이 나왔는지 확인해 보세요."
+                "하락한 이유(추정)는 보통 '기대가 낮아짐' 또는 '불확실성이 커짐'이 가격에 먼저 반영될 때 나타납니다.\n"
+                f"(1) 기사/근거: {headlines_detailed[0]['title_ko']}\n"
+                "(2) 수급: 나쁜 해석/실망이 나오면 사람들이 팔거나(매도) 새로 사는 속도가 줄어들어 하락이 커질 수 있습니다.\n"
+                f"{filter_note}"
             )
     else:
+        # 통과 항목이 없으면 홍보성/저신뢰를 보여주지 않기 위해 빈 근거를 유지
         if is_up:
             summary_ko = (
-                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 상승했습니다. "
-                f"다만 기사 근거를 충분히 찾지 못해, 시장 전반의 수급/기대 흐름을 중심으로 설명합니다."
+                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 상승했지만, "
+                "요청하신 '공신력/검증' 기준을 통과한 기사 근거가 부족했습니다."
             )
             details_ko = (
-                "뉴스를 충분히 찾지 못했을 때는 보통 (1) 지수/섹터 내 자금이 몰리는 흐름, "
-                "(2) 실적 기대가 커지는 구간(가이던스/실적 발표 전후), "
-                "(3) 금리·환율 같은 거시 변수의 영향이 함께 나타납니다.\n"
-                "다음 공시·실적 일정(실적 발표/가이던스 관련)을 확인하면 ‘왜 올랐는지’에 더 가까워질 수 있어요."
+                "이 경우는 두 가지 가능성이 큽니다.\n"
+                "(1) 회사/업계에 실제로 큰 이슈가 있었지만, 기사 RSS에서 '검증된 형태'로 잡히지 않았거나\n"
+                "(2) 지수/섹터 내 전반 수급, 금리·환율 등 거시 요인이 더 크게 작용했을 수 있습니다.\n"
+                f"{filter_note}"
             )
         else:
             summary_ko = (
-                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 하락했습니다. "
-                f"다만 기사 근거를 충분히 찾지 못해, 시장 전반의 수급/기대 조정 흐름을 중심으로 설명합니다."
+                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 하락했지만, "
+                "요청하신 '공신력/검증' 기준을 통과한 기사 근거가 부족했습니다."
             )
             details_ko = (
-                "뉴스를 충분히 찾지 못했을 때는 보통 (1) 지수/섹터 내 자금이 빠지는 흐름, "
-                "(2) 실적 기대가 낮아지는 구간, "
-                "(3) 금리·환율 같은 거시 변수의 영향이 함께 나타납니다.\n"
-                "다음 공시·실적 일정과 업종 내 경쟁사 동향을 함께 확인하면 ‘왜 내렸는지’를 추적하기 좋아요."
+                "이 경우는 보통 (1) 기대가 낮아지는 유형의 정보가 있었지만 공신력 기준으로 분류되지 않았거나, "
+                "(2) 지수/섹터 내 자금 흐름이 먼저 꺾였기 때문일 수 있습니다.\n"
+                f"{filter_note}"
             )
 
     return {
