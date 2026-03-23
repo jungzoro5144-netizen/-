@@ -42,3 +42,7 @@ notification.mp3
 /cache
 trace.json
 /sysinfo-????-??-??-??-??.json
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
