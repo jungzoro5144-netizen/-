@@ -193,6 +193,19 @@
         text-decoration: underline;
         background: rgba(147, 197, 253, 0.08);
       }
+      .transBtn {
+        background: #1e293b;
+        border: 1px solid #334155;
+        color: #e5e7eb;
+        border-radius: 10px;
+        padding: 6px 10px;
+        font-weight: 900;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .transBtn:hover {
+        background: #0f172a;
+      }
       .headlineEn {
         font-weight: 900;
         color: #e5e7eb;
@@ -548,21 +561,104 @@
         if (commonWordPron[raw] !== undefined) return commonWordPron[raw];
         if (commonWordPron[lower] !== undefined) return commonWordPron[lower];
 
-        // 간단 근사: 단어 단위로 각 문자 읽기(대문자/소문자 동일 처리)
-        // 너무 긴 문구는 가독성을 위해 하이픈 사이에만 분절합니다.
+        const translitToken = (token) => {
+          const cleaned = token.replace(/[^A-Za-z]/g, "");
+          if (!cleaned) return token;
+          const s = cleaned.toLowerCase();
+
+          // 자주 등장하는 조합(발음 근사)을 우선 치환
+          const patterns = [
+            ["tion", "션"],
+            ["sion", "션"],
+            ["ture", "처"],
+            ["tch", "치"],
+            ["ch", "치"],
+            ["sh", "시"],
+            ["th", s.startsWith("th") ? "더" : "스"],
+            ["ph", "프"],
+            ["ng", "응"],
+            ["ck", "크"],
+            ["qu", "쿠"],
+            ["ai", "에이"],
+            ["ay", "에이"],
+            ["ee", "이"],
+            ["ea", "이"],
+            ["oo", "우"],
+            ["ou", "아우"],
+            ["oi", "오이"],
+            ["ua", "우아"],
+            ["ar", "아르"],
+            ["or", "오르"],
+            ["er", "어"],
+            ["ir", "이르"],
+            ["ur", "어"],
+            ["al", "알"],
+            ["el", "엘"],
+            ["il", "일"],
+          ];
+
+          const vowelMap = { a: "애", e: "에", i: "이", o: "오", u: "우", y: "이" };
+          const consonantDefault = {
+            b: "브",
+            c: "크",
+            d: "디",
+            f: "에프",
+            g: "그",
+            h: "에이치",
+            j: "제이",
+            k: "케이",
+            l: "엘",
+            m: "엠",
+            n: "엔",
+            p: "피",
+            q: "큐",
+            r: "아르",
+            s: "에스",
+            t: "티",
+            v: "브이",
+            w: "더블유",
+            x: "엑스",
+            z: "지",
+          };
+
+          let out = "";
+          let i = 0;
+          while (i < s.length) {
+            let matched = false;
+            for (const [pat, rep] of patterns) {
+              if (s.startsWith(pat, i)) {
+                out += rep;
+                i += pat.length;
+                matched = true;
+                break;
+              }
+            }
+            if (matched) continue;
+
+            const ch = s[i];
+            const next = s[i + 1] || "";
+            if (vowelMap[ch]) {
+              out += vowelMap[ch];
+            } else if (ch === "c") {
+              // c는 e/i 앞이면 '씨', 그 외는 '크'로 근사
+              out += ["e", "i", "y"].includes(next) ? "씨" : "크";
+            } else {
+              out += consonantDefault[ch] || ch;
+            }
+            i += 1;
+          }
+          return out;
+        };
+
+        // 문장/구두점 포함 시 토큰 단위로 처리
         const tokens = raw.split(/(\s+)/);
         return tokens
           .map((t) => {
             if (/^\s+$/.test(t)) return t;
-            const cleaned = t.replace(/[^A-Za-z]/g, "");
-            if (!cleaned) return t;
-            const letters = cleaned
-              .toLowerCase()
-              .split("")
-              .map((ch) => letterMap[ch] ?? ch);
-            return letters.join("-");
+            return translitToken(t);
           })
-          .join("");
+          .join("")
+          .replaceAll(/\s+/g, " ");
       }
 
       function renderEnglishTriplet(en, ko) {
@@ -626,19 +722,37 @@
           .map((r) => {
             const f = forecasts[r.ticker] || {};
             const headlinesDetailed = r.headlines_detailed || [];
+            const baseId = safeId(r.ticker);
             const headlinesHtml = headlinesDetailed.length
               ? `<ul>${headlinesDetailed
                   .slice(0, 3)
-                  .map((h) => {
+                  .map((h, idx) => {
                     const url = h.url || "#";
-                    const triplet = renderEnglishTriplet(h.title_raw || h.title_ko || "", h.title_ko || "");
+                    const en = h.title_raw || h.title_ko || "";
+                    const ko = h.title_ko || "";
+                    const ph = phoneticizeEnglish(en);
+                    const detailId = `${baseId}-hl-${idx}`;
                     const src = h.source ? `[출처: ${h.source}]` : "";
-                    return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}"><div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>${triplet}</a></li>`;
+                    return `
+                      <li>
+                        <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
+                          <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
+                            <div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>
+                            <div class="headlineEn">${escapeHtml(en)}</div>
+                          </a>
+                          <button class="transBtn" onclick="event.preventDefault(); event.stopPropagation(); toggleEnglishDetail('${escapeHtml(detailId)}');">
+                            번역
+                          </button>
+                        </div>
+                        <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
+                          <div class="headlinePh">${escapeHtml(ph)}</div>
+                          <div class="headlineKo">${escapeHtml(ko)}</div>
+                        </div>
+                      </li>
+                    `;
                   })
                   .join("")}</ul>`
               : `<div class="muted">관련 뉴스 없음</div>`;
-
-            const baseId = safeId(r.ticker);
             const shortBlockId = `${baseId}-short`;
             const midBlockId = `${baseId}-mid`;
             const longBlockId = `${baseId}-long`;
@@ -707,13 +821,34 @@
         if (!r) return;
 
         const headlinesDetailed = r.headlines_detailed || [];
+        const safeId = (s) => String(s ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
+        const baseId = safeId(ticker);
         const headlinesList = headlinesDetailed.length
           ? headlinesDetailed
-              .map((h) => {
+              .map((h, idx) => {
                 const url = h.url || "#";
-                const triplet = renderEnglishTriplet(h.title_raw || h.title_ko || "", h.title_ko || "");
+                const en = h.title_raw || h.title_ko || "";
+                const ko = h.title_ko || "";
+                const ph = phoneticizeEnglish(en);
+                const detailId = `${baseId}-m-hl-${idx}`;
                 const src = h.source ? `[출처: ${h.source}]` : "";
-                return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}"><div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>${triplet}</a></li>`;
+                return `
+                  <li>
+                    <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
+                      <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
+                        <div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>
+                        <div class="headlineEn">${escapeHtml(en)}</div>
+                      </a>
+                      <button class="transBtn" onclick="event.preventDefault(); event.stopPropagation(); toggleEnglishDetail('${escapeHtml(detailId)}');">
+                        번역
+                      </button>
+                    </div>
+                    <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
+                      <div class="headlinePh">${escapeHtml(ph)}</div>
+                      <div class="headlineKo">${escapeHtml(ko)}</div>
+                    </div>
+                  </li>
+                `;
               })
               .join("")
           : `<div class="muted">관련 뉴스 없음</div>`;
@@ -739,6 +874,12 @@
         document.getElementById("reasonModalBackdrop").style.display = "none";
       }
 
+      function toggleEnglishDetail(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = el.style.display === "none" ? "block" : "none";
+      }
+
       function toggleForecastDetails(id) {
         const el = document.getElementById(id);
         if (!el) return;
@@ -751,6 +892,7 @@
           const res = await fetch(market === "KR" ? "/kr/daily-report" : "/us/daily-report");
           if (!res.ok) throw new Error(`API 오류 (${res.status})`);
           const d = await res.json();
+          currentReport = d;
 
           const ts = new Date(d.generated_at).toLocaleString("ko-KR", { hour12: false });
           elMeta.textContent = `${d.market_name_ko} 시장 | 생성시각: ${ts}`;
