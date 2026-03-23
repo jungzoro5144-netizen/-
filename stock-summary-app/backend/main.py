@@ -53,6 +53,32 @@ US_UNIVERSE: Dict[str, str] = {
     "AVGO": "Broadcom",
 }
 
+COMPANY_TYPE_KR: Dict[str, str] = {
+    "005930.KS": "반도체/전자부품(메모리·시스템반도체) + 스마트폰·가전",
+    "000660.KS": "반도체(주로 D램·낸드 메모리)",
+    "035420.KS": "인터넷 서비스(검색·포털·광고) 및 콘텐츠",
+    "051910.KS": "석유화학 + 2차전지 소재(배터리 핵심 부품)",
+    "005380.KS": "자동차 제조 + 모빌리티(완성차)",
+    "207940.KS": "바이오의약품 위탁생산(CDMO)",
+    "006400.KS": "2차전지(리튬이온 배터리) 및 소재",
+    "035720.KS": "플랫폼(메신저·콘텐츠) + 디지털 광고",
+    "068270.KS": "바이오의약품(바이오시밀러/항체치료제)",
+    "012330.KS": "자동차 부품(모듈/핵심 부품) + 전장(전기부품)",
+}
+
+COMPANY_TYPE_US: Dict[str, str] = {
+    "AAPL": "소비자 전자제품 + 서비스(스마트기기·생태계)",
+    "MSFT": "소프트웨어 + 클라우드(Azure, 기업용 서비스)",
+    "NVDA": "AI 반도체/가속기(GPU) + 데이터센터 인프라",
+    "AMZN": "전자상거래 + 클라우드(AWS)",
+    "GOOGL": "검색/유튜브 + 광고/클라우드(GCP)",
+    "META": "소셜 플랫폼 + 광고(메타버스/인스타·페이스북)",
+    "BRK-B": "보험 + 대규모 투자(지주/투자회사)",
+    "TSLA": "전기차 + 에너지(배터리/전력 솔루션)",
+    "LLY": "제약/바이오(의약품 개발·생산)",
+    "AVGO": "반도체 인프라(네트워킹/SoC) + 기업용 칩",
+}
+
 MAJOR_SOURCES = {
     "reuters",
     "bloomberg",
@@ -114,49 +140,74 @@ COMPETITORS_US: Dict[str, List[str]] = {
 class Move:
     ticker: str
     name: str
+    company_type: str
     close: float
     prev_close: float
     change_pct: float
     volume: int
 
 
-def _forecast_ko(m: Move, market: Market) -> Dict[str, str]:
+def _forecast_ko(m: Move, market: Market) -> Dict[str, Dict[str, str]]:
     comps = (COMPETITORS_KR if market == "KR" else COMPETITORS_US).get(m.ticker, [])
     comps_str = ", ".join(comps[:2]) if comps else "동종 기업"
-    up = m.change_pct >= 0
+    is_up = m.change_pct >= 0
     magnitude = abs(m.change_pct)
-    momentum = "강한 모멘텀" if magnitude >= 2.0 else "완만한 모멘텀"
+    momentum = "강한 모멘텀(가격이 한 방향으로 밀어주는 힘)" if magnitude >= 2.0 else "완만한 모멘텀"
 
-    if up:
-        short_term = (
-            f"긍정: {momentum}이 유지되면 단기 추세가 이어질 가능성이 있습니다.\n"
-            f"왜 긍정적으로 보나? 시장 기대가 빠르게 반영되고, {comps_str} 대비 '해석의 속도'가 더 빠를 수 있습니다.\n"
-            f"부정: 다만 단기 급등 구간에서는 차익실현과 변동성 확대가 동반될 수 있습니다.\n"
-            f"왜 부정적으로 보나? 같은 호재라도 경쟁사 대비 상대 모멘텀이 약해지면 자금이 분산될 수 있기 때문입니다."
+    # 용어 해설을 문장 안에 괄호로 붙여 초보자도 바로 이해할 수 있게 구성
+    def glossary_terms() -> str:
+        return (
+            "용어해설: 수급(주식을 사는/파는 흐름), 가이던스(회사가 제시하는 향후 실적 전망), "
+            "마진(이익률), 밸류에이션(주가가 기업가치를 얼마나 반영하는지), "
+            "CAPEX(공장/설비에 쓰는 투자), 운전자본(일상 운영에 필요한 돈), 현금흐름(돈의 실제 유입/유출)."
+        )
+
+    if is_up:
+        short_summary = "단기: 긍정 우세(모멘텀 지속) vs 변동성 확대 가능"
+        short_details = (
+            f"단기(1주) 전망:\n"
+            f"- 긍정: {momentum}이 유지되면 추세가 이어질 가능성이 있습니다.\n"
+            f"  왜 긍정적으로 보나? 시장 기대가 빠르게 반영되며, {comps_str} 대비 ‘좋은 해석’이 더 빨리 가격에 들어오기 때문입니다.\n"
+            f"- 부정: 급등 구간에서는 차익실현(이미 오른 만큼 되팔기)과 변동성 확대가 동반될 수 있습니다.\n"
+            f"  왜 부정적으로 보나? 같은 호재라도 경쟁사 대비 상대 모멘텀이 약해지면 자금이 분산될 수 있기 때문입니다.\n"
+            f"{glossary_terms()}"
         )
     else:
-        short_term = (
-            f"긍정: 하락 이후에도 핵심 재료가 유지되면 기술적 반등/수급 안정이 가능할 수 있습니다.\n"
-            f"왜 긍정적으로 보나? 과도한 우려가 먼저 가격에 반영됐다면, {comps_str} 대비 하방이 제한될 수 있습니다.\n"
-            f"부정: 하락이 '확정 뉴스'로 촉발됐다면 단기 반등이 지연될 수 있습니다.\n"
-            f"왜 부정적으로 보나? 상대 매력이 경쟁사보다 낮아 보이면 회복 자금이 늦게 유입될 수 있습니다."
+        short_summary = "단기: 반등 여지 vs 하방 압력(실망 뉴스/경쟁 약세)"
+        short_details = (
+            f"단기(1주) 전망:\n"
+            f"- 긍정: 핵심 재료가 흔들리지 않으면 기술적 반등과 수급 안정 가능성이 있습니다.\n"
+            f"  왜 긍정적으로 보나? 과도한 우려가 먼저 가격에 반영됐다면, {comps_str} 대비 하방이 제한될 수 있습니다.\n"
+            f"- 부정: 하락이 ‘확정적인 실망(가이던스 하향, 실적 미스 등)’으로 이어지면 단기 반등이 지연될 수 있습니다.\n"
+            f"  왜 부정적으로 보나? 경쟁사 대비 상대 매력이 낮아 보이면 회복 자금이 늦게 유입될 수 있습니다.\n"
+            f"{glossary_terms()}"
         )
 
-    mid_term = (
-        "긍정: 중기(1~3개월)에서는 실적/가이던스/업황이 실제 데이터로 확인되며, 시장의 눈높이가 재정렬될 가능성이 있습니다.\n"
-        f"왜 긍정적으로 보나? {comps_str} 대비 마진·수요·라인업(또는 공급망) 측면에서 우위가 관측될 수 있기 때문입니다.\n"
-        "부정: 다만 금리/환율/원가 같은 외생 변수가 실적 가시성을 흔들 수 있습니다.\n"
-        f"왜 부정적으로 보나? 외생 변수 악화 시 경쟁사({comps_str})와의 상대 비용 구조 차이가 중요해지는데, 격차가 제한적이면 탄력이 줄 수 있습니다."
+    mid_summary = "중기(1~3개월): 실적/가이던스 확인으로 재평가 가능"
+    mid_details = (
+        "중기(1~3개월) 전망:\n"
+        f"- 긍정: 실적과 가이던스(향후 실적 전망), 업황 데이터가 쌓이면 시장의 눈높이가 재정렬될 수 있습니다.\n"
+        f"  왜 긍정적으로 보나? {comps_str} 대비 마진(이익률)·수요·라인업(제품 구성) 또는 공급망(원자재~생산~판매 연결)이 우호적으로 나타나기 쉽기 때문입니다.\n"
+        "- 부정: 금리/환율/원가(외생 변수)가 실적 가시성을 흔들 수 있습니다.\n"
+        f"  왜 부정적으로 보나? 외생 변수 악화 시 경쟁사({comps_str})와의 상대 비용 구조 차이가 중요해지는데, 격차가 크지 않으면 탄력이 줄 수 있습니다.\n"
+        f"{glossary_terms()}"
     )
 
-    long_term = (
-        "긍정: 장기(1년+)에서는 경쟁우위가 누적되며(기술/브랜드/공급망), 현금흐름이 안정될 여지가 있습니다.\n"
-        f"왜 긍정적으로 보나? {comps_str} 대비 차별화 포인트가 '반복 가능한 이익'으로 이어질 때 밸류에이션이 안정될 수 있습니다.\n"
-        "부정: 장기에서는 산업 사이클 전환 시 성장 프리미엄이 축소될 위험도 있습니다.\n"
-        f"왜 부정적으로 보나? 경쟁사가 유사 전략으로 따라오면 격차가 줄어들 수 있고, CAPEX/운전자본 부담이 커질 수 있기 때문입니다."
+    long_summary = "장기(1년+): 경쟁우위 누적 vs 산업 사이클 리스크"
+    long_details = (
+        "장기(1년+) 전망:\n"
+        "- 긍정: 기술/브랜드/공급망처럼 경쟁우위가 누적되면 현금흐름이 안정될 여지가 있습니다.\n"
+        f"  왜 긍정적으로 보나? {comps_str} 대비 차별화가 ‘반복 가능한 이익’으로 연결될 때 밸류에이션이 안정되기 때문입니다.\n"
+        "- 부정: 산업 사이클이 꺾이면 성장 프리미엄이 줄어들 수 있습니다.\n"
+        f"  왜 부정적으로 보나? 경쟁사가 유사 전략으로 따라오면 격차가 축소되고, CAPEX(설비투자)·운전자본 부담이 커질 수 있기 때문입니다.\n"
+        f"{glossary_terms()}"
     )
 
-    return {"short_term": short_term, "mid_term": mid_term, "long_term": long_term}
+    return {
+        "short_term": {"summary": short_summary, "details": short_details},
+        "mid_term": {"summary": mid_summary, "details": mid_details},
+        "long_term": {"summary": long_summary, "details": long_details},
+    }
 
 
 def _translate_to_ko(text: str) -> str:
@@ -230,30 +281,59 @@ def _reason_ko(m: Move, market: Market) -> Dict[str, object]:
     market_name = "국내" if market == "KR" else "미국"
     headlines_detailed = _fetch_news_for_stock(m, market)
     headlines_ko = [f"[출처: {h['source']}] {h['title_ko']}" for h in headlines_detailed]
+    is_up = m.change_pct > 0
     if headlines_detailed:
         topic = "; ".join([h["title_ko"] for h in headlines_detailed[:2]])
-        summary_ko = (
-            f"{m.name}({m.ticker})은 전일 대비 {m.change_pct:+.2f}% 변동했습니다. "
-            f"최근 주요 뉴스에서는 {topic} 이슈가 확인됩니다."
-        )
-        details_ko = (
-            f"이번 변동은 (1) {headlines_detailed[0]['title_ko']} 같은 핵심 헤드라인의 해석과 "
-            f"(2) 그 이후 수급(매수/매도)의 반응이 동시에 반영된 흐름으로 볼 수 있습니다.\n"
-            f"참고로 아래 기사들은 실제로 클릭해서 내용을 확인할 수 있습니다."
-        )
+        if is_up:
+            summary_ko = (
+                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 상승했습니다. "
+                f"관련 뉴스에서 확인되는 핵심 포인트는 {topic} 입니다."
+            )
+            details_ko = (
+                f"상승한 이유(추정)는 두 가지가 동시에 맞물린 경우가 많습니다. "
+                f"(1) 헤드라인({headlines_detailed[0]['title_ko']})이 시장 기대를 높였고, "
+                f"(2) 그 뒤로 수급(주식을 사는 사람/파는 사람의 흐름)이 그 기대를 가격에 반영했기 때문입니다.\n"
+                f"아래 기사들을 클릭해서 실제로 어떤 내용이 나왔는지 확인해 보세요."
+            )
+        else:
+            summary_ko = (
+                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 하락했습니다. "
+                f"관련 뉴스에서 확인되는 핵심 포인트는 {topic} 입니다."
+            )
+            details_ko = (
+                f"하락한 이유(추정)는 보통 기대가 꺾이거나 불확실성이 커질 때 나타납니다. "
+                f"(1) 헤드라인({headlines_detailed[0]['title_ko']})이 ‘좋아야 할 것’에 대한 의문을 만들었고, "
+                f"(2) 이후 수급(매수/매도)이 기대를 되돌려 버리면서 가격이 빠르게 조정됐을 가능성이 있습니다.\n"
+                f"아래 기사들을 클릭해서 실제로 어떤 내용이 나왔는지 확인해 보세요."
+            )
     else:
-        summary_ko = (
-            f"{m.name}({m.ticker})은 전일 대비 {m.change_pct:+.2f}% 변동했습니다. "
-            f"최근 {market_name} 시장 전반의 수급/실적 기대/금리 이슈가 복합적으로 반영된 흐름으로 해석됩니다."
-        )
-        details_ko = (
-            "기사 기반 근거를 충분히 가져오지 못한 경우, 보통은 지수/섹터 내 수급과 "
-            "거시 변수(금리, 환율), 업종 기대/실망이 함께 반영됩니다.\n"
-            "이 경우에는 다음 날/주간의 공시·실적 이벤트 캘린더를 함께 확인하는 것이 도움이 됩니다."
-        )
+        if is_up:
+            summary_ko = (
+                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 상승했습니다. "
+                f"다만 기사 근거를 충분히 찾지 못해, 시장 전반의 수급/기대 흐름을 중심으로 설명합니다."
+            )
+            details_ko = (
+                "뉴스를 충분히 찾지 못했을 때는 보통 (1) 지수/섹터 내 자금이 몰리는 흐름, "
+                "(2) 실적 기대가 커지는 구간(가이던스/실적 발표 전후), "
+                "(3) 금리·환율 같은 거시 변수의 영향이 함께 나타납니다.\n"
+                "다음 공시·실적 일정(실적 발표/가이던스 관련)을 확인하면 ‘왜 올랐는지’에 더 가까워질 수 있어요."
+            )
+        else:
+            summary_ko = (
+                f"{m.name}는 전일 대비 {m.change_pct:+.2f}% 하락했습니다. "
+                f"다만 기사 근거를 충분히 찾지 못해, 시장 전반의 수급/기대 조정 흐름을 중심으로 설명합니다."
+            )
+            details_ko = (
+                "뉴스를 충분히 찾지 못했을 때는 보통 (1) 지수/섹터 내 자금이 빠지는 흐름, "
+                "(2) 실적 기대가 낮아지는 구간, "
+                "(3) 금리·환율 같은 거시 변수의 영향이 함께 나타납니다.\n"
+                "다음 공시·실적 일정과 업종 내 경쟁사 동향을 함께 확인하면 ‘왜 내렸는지’를 추적하기 좋아요."
+            )
 
     return {
         "ticker": m.ticker,
+        "name": m.name,
+        "company_type": m.company_type,
         "summary_ko": summary_ko,
         "headlines_ko": headlines_ko,
         "details_ko": details_ko,
@@ -261,7 +341,7 @@ def _reason_ko(m: Move, market: Market) -> Dict[str, object]:
     }
 
 
-def _mock_moves(universe: Dict[str, str]) -> List[Move]:
+def _mock_moves(universe: Dict[str, str], market: Market) -> List[Move]:
     seed = [
         2.13,
         -1.52,
@@ -275,6 +355,7 @@ def _mock_moves(universe: Dict[str, str]) -> List[Move]:
         0.51,
     ]
     out: List[Move] = []
+    company_type_map = COMPANY_TYPE_KR if market == "KR" else COMPANY_TYPE_US
     for i, (ticker, name) in enumerate(universe.items()):
         close = float(100 + i * 8)
         pct = seed[i % len(seed)]
@@ -283,6 +364,7 @@ def _mock_moves(universe: Dict[str, str]) -> List[Move]:
             Move(
                 ticker=ticker,
                 name=name,
+                company_type=company_type_map.get(ticker, "업종 미정"),
                 close=round(close, 2),
                 prev_close=round(prev, 2),
                 change_pct=round(pct, 2),
@@ -299,7 +381,7 @@ def _fetch_moves(universe: Dict[str, str], market: Market) -> List[Move]:
         return cached[1]
 
     if yf is None:
-        mocked = _mock_moves(universe)
+        mocked = _mock_moves(universe, market)
         _moves_cache[market] = (now, mocked)
         return mocked
 
@@ -314,11 +396,12 @@ def _fetch_moves(universe: Dict[str, str], market: Market) -> List[Move]:
         threads=True,
     )
     if data is None or len(data) == 0:
-        mocked = _mock_moves(universe)
+        mocked = _mock_moves(universe, market)
         _moves_cache[market] = (now, mocked)
         return mocked
 
     moves: List[Move] = []
+    company_type_map = COMPANY_TYPE_KR if market == "KR" else COMPANY_TYPE_US
     for ticker, name in universe.items():
         try:
             frame = data[ticker].dropna()
@@ -332,6 +415,7 @@ def _fetch_moves(universe: Dict[str, str], market: Market) -> List[Move]:
                 Move(
                     ticker=ticker,
                     name=name,
+                    company_type=company_type_map.get(ticker, "업종 미정"),
                     close=round(close, 2),
                     prev_close=round(prev_close, 2),
                     change_pct=round(change_pct, 2),
@@ -341,7 +425,7 @@ def _fetch_moves(universe: Dict[str, str], market: Market) -> List[Move]:
         except Exception:
             continue
 
-    result = moves or _mock_moves(universe)
+    result = moves or _mock_moves(universe, market)
     _moves_cache[market] = (now, result)
     return result
 
@@ -357,8 +441,8 @@ def _build_report(market: Market) -> Dict[str, object]:
     moves = _fetch_moves(universe, market)
 
     top_market_cap = moves[:10]
-    top_gainers = sorted(moves, key=lambda x: x.change_pct, reverse=True)[:10]
-    top_losers = sorted(moves, key=lambda x: x.change_pct)[:10]
+    top_gainers = sorted([m for m in moves if m.change_pct > 0], key=lambda x: x.change_pct, reverse=True)[:10]
+    top_losers = sorted([m for m in moves if m.change_pct < 0], key=lambda x: x.change_pct)[:10]
     dedup_moves = {m.ticker: m for m in (top_market_cap + top_gainers + top_losers)}
     reason_map = {ticker: _reason_ko(mv, market) for ticker, mv in dedup_moves.items()}
 

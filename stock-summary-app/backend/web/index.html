@@ -101,6 +101,24 @@
         max-height: 110px;
         overflow: hidden;
       }
+      .forecast-toggle {
+        background: #0f172a;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        padding: 8px 10px;
+        color: #e5e7eb;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      .forecast-details {
+        margin-top: 6px;
+        background: #0b1226;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        padding: 10px 12px;
+        color: #e5e7eb;
+        line-height: 1.55;
+      }
       .modalBackdrop {
         position: fixed;
         inset: 0;
@@ -250,7 +268,7 @@
             return `
               <tr>
                 <td>${m.name}</td>
-                <td>${m.ticker}</td>
+                <td>${m.company_type || "-"}</td>
                 <td class="num">${fmtNum(m.close)}</td>
                 <td class="num ${cls}">${fmtPct(m.change_pct)}</td>
               </tr>
@@ -265,7 +283,7 @@
               <thead>
                 <tr>
                   <th>종목</th>
-                  <th>티커</th>
+                  <th>유형</th>
                   <th class="num">종가</th>
                   <th class="num">등락률</th>
                 </tr>
@@ -277,6 +295,7 @@
       }
 
       function renderReasons(title, reasons, forecasts) {
+        const safeId = (s) => String(s ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
         const rows = reasons
           .map((r) => {
             const f = forecasts[r.ticker] || {};
@@ -292,24 +311,53 @@
                   .join("")}</ul>`
               : `<div class="muted">관련 뉴스 없음</div>`;
 
-            const previewShort = f.short_term ? fmtForecast(f.short_term) : "-";
-            const previewMid = f.mid_term ? fmtForecast(f.mid_term) : "-";
-            const previewLong = f.long_term ? fmtForecast(f.long_term) : "-";
+            const baseId = safeId(r.ticker);
+            const shortBlockId = `${baseId}-short`;
+            const midBlockId = `${baseId}-mid`;
+            const longBlockId = `${baseId}-long`;
+
+            const shortSummary = f?.short_term?.summary || "-";
+            const midSummary = f?.mid_term?.summary || "-";
+            const longSummary = f?.long_term?.summary || "-";
+
+            const shortDetails = f?.short_term?.details || "";
+            const midDetails = f?.mid_term?.details || "";
+            const longDetails = f?.long_term?.details || "";
 
             return `
               <article class="reason">
-                <div class="reason-title">${escapeHtml(r.ticker)}</div>
+                <div class="reason-title">
+                  ${escapeHtml(r.name || r.ticker)}<span class="muted" style="font-weight:600;"> · ${escapeHtml(r.company_type || "")}</span>
+                </div>
                 <div class="reason-summary clickable" data-ticker="${escapeHtml(r.ticker)}">
                   ${nlToBr(r.summary_ko || "요약 없음")}
                 </div>
                 ${headlinesHtml}
+
                 <div class="forecast-text muted" style="margin-top:10px;">
-                  <div><strong>단기</strong>:</div>
-                  <div class="forecast-preview">${previewShort}</div>
-                  <div style="margin-top:8px;"><strong>중기</strong>:</div>
-                  <div class="forecast-preview">${previewMid}</div>
-                  <div style="margin-top:8px;"><strong>장기</strong>:</div>
-                  <div class="forecast-preview">${previewLong}</div>
+                  <div style="margin-bottom:6px;"><strong>단기</strong></div>
+                  <div class="forecast-toggle clickable" onclick="toggleForecastDetails('${shortBlockId}')">
+                    ${escapeHtml(shortSummary)}
+                  </div>
+                  <div id="${shortBlockId}" class="forecast-details" style="display:none;">
+                    ${fmtForecast(shortDetails)}
+                  </div>
+
+                  <div style="margin-top:10px; margin-bottom:6px;"><strong>중기</strong></div>
+                  <div class="forecast-toggle clickable" onclick="toggleForecastDetails('${midBlockId}')">
+                    ${escapeHtml(midSummary)}
+                  </div>
+                  <div id="${midBlockId}" class="forecast-details" style="display:none;">
+                    ${fmtForecast(midDetails)}
+                  </div>
+
+                  <div style="margin-top:10px; margin-bottom:6px;"><strong>장기</strong></div>
+                  <div class="forecast-toggle clickable" onclick="toggleForecastDetails('${longBlockId}')">
+                    ${escapeHtml(longSummary)}
+                  </div>
+                  <div id="${longBlockId}" class="forecast-details" style="display:none;">
+                    ${fmtForecast(longDetails)}
+                  </div>
                 </div>
               </article>
             `;
@@ -340,21 +388,27 @@
               .join("")
           : `<div class="muted">관련 뉴스 없음</div>`;
 
-        document.getElementById("reasonModalTitle").textContent = `${r.ticker} 상세`;
+        document.getElementById("reasonModalTitle").textContent = `${r.name || r.ticker} · ${r.company_type || ""}`;
         document.getElementById("reasonModalSummary").innerHTML = nlToBr(r.summary_ko || "요약 없음");
         document.getElementById("reasonModalDetails").innerHTML = nlToBr(r.details_ko || "자세한 설명 없음");
         document.getElementById("reasonModalHeadlines").innerHTML = headlinesList.startsWith("<div")
           ? headlinesList
           : `<ul>${headlinesList}</ul>`;
-        document.getElementById("reasonModalShort").innerHTML = fmtForecast(f.short_term || "-");
-        document.getElementById("reasonModalMid").innerHTML = fmtForecast(f.mid_term || "-");
-        document.getElementById("reasonModalLong").innerHTML = fmtForecast(f.long_term || "-");
+        document.getElementById("reasonModalShort").innerHTML = fmtForecast(f?.short_term?.details || "-");
+        document.getElementById("reasonModalMid").innerHTML = fmtForecast(f?.mid_term?.details || "-");
+        document.getElementById("reasonModalLong").innerHTML = fmtForecast(f?.long_term?.details || "-");
 
         document.getElementById("reasonModalBackdrop").style.display = "flex";
       }
 
       function closeReasonModal() {
         document.getElementById("reasonModalBackdrop").style.display = "none";
+      }
+
+      function toggleForecastDetails(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = el.style.display === "none" ? "block" : "none";
       }
 
       async function load() {
@@ -373,11 +427,11 @@
 
           elContent.innerHTML = `
             <div class="grid">
-              ${renderTable("상승률 상위 10", d.top_gainers || [])}
-              ${renderTable("하락률 상위 10", d.top_losers || [])}
-              ${renderTable("시가총액 상위 10", d.top_market_cap || [])}
+              ${renderTable(`상승률 상위 ${(d.top_gainers || []).length}개`, d.top_gainers || [])}
+              ${renderTable(`하락률 상위 ${(d.top_losers || []).length}개`, d.top_losers || [])}
+              ${renderTable(`시가총액 상위 ${(d.top_market_cap || []).length}개`, d.top_market_cap || [])}
             </div>
-            ${renderReasons("주요 사유 + 단/중/장기 전망", d.top_market_cap_reasons || [], d.forecasts || {})}
+            ${renderReasons("상승/하락 주요 사유 + 단/중/장기 전망", d.movers_reasons || [], d.forecasts || {})}
           `;
 
           // 카드의 "주요 사유" 영역 클릭 → 상세 모달
