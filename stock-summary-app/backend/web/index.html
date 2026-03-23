@@ -88,6 +88,27 @@
         color: #60a5fa;
         font-weight: 700;
       }
+      .hlPos {
+        background: rgba(248, 113, 113, 0.16);
+        color: #fb7185;
+        font-weight: 900;
+        padding: 0 6px;
+        border-radius: 999px;
+      }
+      .hlNeg {
+        background: rgba(96, 165, 250, 0.16);
+        color: #60a5fa;
+        font-weight: 900;
+        padding: 0 6px;
+        border-radius: 999px;
+      }
+      .hlKey {
+        background: rgba(147, 197, 253, 0.14);
+        color: #93c5fd;
+        font-weight: 900;
+        padding: 0 6px;
+        border-radius: 999px;
+      }
       .clickable {
         cursor: pointer;
         text-decoration: underline;
@@ -109,6 +130,9 @@
         color: #e5e7eb;
         font-weight: 800;
         cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .forecast-details {
         margin-top: 6px;
@@ -161,9 +185,32 @@
       .headlineLink {
         color: #93c5fd;
         text-decoration: none;
+        display: block;
+        padding: 6px 8px;
+        border-radius: 10px;
       }
       .headlineLink:hover {
         text-decoration: underline;
+        background: rgba(147, 197, 253, 0.08);
+      }
+      .headlineEn {
+        font-weight: 900;
+        color: #e5e7eb;
+        line-height: 1.2;
+      }
+      .headlinePh {
+        font-weight: 800;
+        color: #93c5fd;
+        font-size: 12px;
+        margin-top: 2px;
+        line-height: 1.2;
+      }
+      .headlineKo {
+        font-weight: 700;
+        color: #cbd5e1;
+        font-size: 12px;
+        margin-top: 2px;
+        line-height: 1.25;
       }
       .panel {
         margin-top: 14px;
@@ -224,6 +271,30 @@
         <button id="btnUS" class="btn">미국</button>
         <button id="btnRefresh" class="btn">새로고침</button>
       </div>
+      <div style="margin-top:10px; margin-bottom:12px;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div style="font-weight:900; color:#e5e7eb;">음성 읽기(요약)</div>
+          <label style="color:#cbd5e1; font-weight:700;">
+            성별
+            <select id="voiceGender" style="margin-left:8px; background:#0f172a; color:#e5e7eb; border:1px solid #1f2937; border-radius:10px; padding:6px 10px;">
+              <option value="male">남성</option>
+              <option value="female">여성</option>
+            </select>
+          </label>
+          <label style="color:#cbd5e1; font-weight:700;">
+            속도
+            <select id="voiceRate" style="margin-left:8px; background:#0f172a; color:#e5e7eb; border:1px solid #1f2937; border-radius:10px; padding:6px 10px;">
+              <option value="0.5">0.5배속</option>
+              <option value="1" selected>1배속</option>
+              <option value="1.5">1.5배속</option>
+              <option value="2">2배속</option>
+            </select>
+          </label>
+          <button id="btnSpeak" class="btn" style="background:#1d4ed8;">요약 읽기</button>
+          <button id="btnStop" class="btn" style="background:#1e293b;">정지</button>
+        </div>
+        <div id="voiceStatus" class="muted" style="margin-top:6px; font-weight:600;">음성은 브라우저 기능을 사용합니다.</div>
+      </div>
       <div id="content" class="loading">불러오는 중...</div>
     </div>
 
@@ -231,12 +302,154 @@
       let market = "KR";
       let reasonByTicker = new Map();
       let forecastsByTicker = {};
+      let currentReport = null;
+
+      let availableVoices = [];
+      let voiceByGenderCache = { male: null, female: null };
 
       const elContent = document.getElementById("content");
       const elMeta = document.getElementById("meta");
       const btnKR = document.getElementById("btnKR");
       const btnUS = document.getElementById("btnUS");
       const btnRefresh = document.getElementById("btnRefresh");
+      const btnSpeak = document.getElementById("btnSpeak");
+      const btnStop = document.getElementById("btnStop");
+      const voiceGenderEl = document.getElementById("voiceGender");
+      const voiceRateEl = document.getElementById("voiceRate");
+      const voiceStatus = document.getElementById("voiceStatus");
+
+      function refreshVoices() {
+        try {
+          availableVoices = speechSynthesis.getVoices() || [];
+          voiceByGenderCache = { male: null, female: null };
+        } catch (e) {
+          availableVoices = [];
+        }
+      }
+
+      if ("speechSynthesis" in window) {
+        refreshVoices();
+        speechSynthesis.onvoiceschanged = refreshVoices;
+      }
+
+      function pickVoice(gender) {
+        const koVoices = (availableVoices || []).filter((v) => (v.lang || "").toLowerCase().startsWith("ko"));
+        const candidates = koVoices.length ? koVoices : availableVoices;
+        if (!candidates || candidates.length === 0) return null;
+
+        if (gender === "female") {
+          const female = candidates.find((v) => /female|woman|여성|feminine/i.test(v.name || ""));
+          if (female) return female;
+          return candidates.find((v) => (v.name || "").toLowerCase().includes("woman")) || candidates[0] || null;
+        }
+
+        const male = candidates.find((v) => /male|man|남성|masculine/i.test(v.name || ""));
+        if (male) return male;
+        return candidates[0] || null;
+      }
+
+      function normalizeForSpeech(s) {
+        return String(s ?? "")
+          .replaceAll(/\s+/g, " ")
+          .replaceAll(/[\r\n]+/g, " ")
+          .trim();
+      }
+
+      function stripValidationForSpeech(detailsKo) {
+        const s = String(detailsKo ?? "");
+        const before = s.split("검증 결과:")[0];
+        const before2 = before.split("용어해설:")[0];
+        return normalizeForSpeech(before2);
+      }
+
+      function buildSpeechText(report, market) {
+        if (!report) return "";
+
+        const isKR = market === "KR";
+        const gainers = report.top_gainers || [];
+        const losers = report.top_losers || [];
+        const reasonsAll = [].concat(report.top_market_cap_reasons || [], report.movers_reasons || []);
+        const reasonMap = new Map(reasonsAll.map((r) => [r.ticker, r]));
+
+        const title = isKR ? "대한민국 시장" : "미국 시장";
+        const speedIntro = "";
+
+        function speakName(nameVal) {
+          const s = String(nameVal ?? "");
+          return /[A-Za-z]/.test(s) ? phoneticizeEnglish(s) : s;
+        }
+
+        let chunks = [];
+
+        // 1) 상승율 상위 10
+        let t1 = `${title}에서 상승율 상위 ${gainers.length}개 종목입니다. `;
+        gainers.slice(0, 10).forEach((m, idx) => {
+          const r = reasonMap.get(m.ticker);
+          const why = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
+          t1 += `${idx + 1}위. ${normalizeForSpeech(speakName(m.name))}. ${why ? "이유: " + why : ""} `;
+        });
+        chunks.push(normalizeForSpeech(t1) + ".");
+
+        // 2) 하락율 상위 10
+        let t2 = `${title}에서 하락율 상위 ${losers.length}개 종목입니다. `;
+        losers.slice(0, 10).forEach((m, idx) => {
+          const r = reasonMap.get(m.ticker);
+          const why = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
+          t2 += `${idx + 1}위. ${normalizeForSpeech(speakName(m.name))}. ${why ? "이유: " + why : ""} `;
+        });
+        chunks.push(normalizeForSpeech(t2) + ".");
+
+        // 3) 상승/하락 주요 내용
+        const gainersMain = gainers.slice(0, 3).map((m) => {
+          const r = reasonMap.get(m.ticker);
+          return `${normalizeForSpeech(speakName(m.name))} 중요 포인트: ${stripValidationForSpeech(r?.details_ko)}.`;
+        });
+        const losersMain = losers.slice(0, 3).map((m) => {
+          const r = reasonMap.get(m.ticker);
+          return `${normalizeForSpeech(speakName(m.name))} 중요 포인트: ${stripValidationForSpeech(r?.details_ko)}.`;
+        });
+
+        chunks.push(`상승 주요 내용입니다. ${normalizeForSpeech(gainersMain.join(" "))}`);
+        chunks.push(`하락 주요 내용입니다. ${normalizeForSpeech(losersMain.join(" "))}`);
+
+        return chunks.filter(Boolean);
+      }
+
+      function speakOne(text, gender, rate) {
+        return new Promise((resolve) => {
+          if (!text || !("speechSynthesis" in window)) return resolve();
+
+          speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.lang = "ko-KR";
+          utter.rate = rate;
+          utter.pitch = gender === "female" ? 1.15 : 0.9;
+          const v = pickVoice(gender);
+          if (v) utter.voice = v;
+          utter.onend = () => resolve();
+          utter.onerror = () => resolve();
+          speechSynthesis.speak(utter);
+        });
+      }
+
+      async function speakSequence(textChunks, gender, rate) {
+        if (!textChunks || !textChunks.length) {
+          voiceStatus.textContent = "읽을 내용이 없습니다. 먼저 데이터를 불러오세요.";
+          return;
+        }
+        voiceStatus.textContent = "음성으로 읽는 중입니다...";
+        for (const ch of textChunks) {
+          // 너무 긴 문장은 끊길 수 있어 짧게 쪼갬
+          const parts = String(ch).split(/(?<=[.!?])\s+/).filter(Boolean);
+          const small = parts.length ? parts : [ch];
+          for (const s of small.slice(0, 8)) {
+            // rate/pitch 적용 유지
+            // eslint-disable-next-line no-await-in-loop
+            await speakOne(s, gender, rate);
+          }
+        }
+        voiceStatus.textContent = "읽기 완료";
+      }
 
       const escapeHtml = (str) =>
         String(str ?? "")
@@ -248,11 +461,122 @@
 
       const fmtNum = (n) => Number(n ?? 0).toLocaleString("ko-KR");
       const fmtPct = (n) => `${n > 0 ? "+" : ""}${Number(n ?? 0).toFixed(2)}%`;
-      const nlToBr = (s) => escapeHtml(s).replaceAll("\n", "<br/>");
+      function emphasizeText(s) {
+        let out = escapeHtml(s ?? "");
+        // 핵심 키워드(초보자용) 강조
+        out = out.replaceAll("검증", `<span class="hlKey"><b>검증</b></span>`);
+        out = out.replaceAll("통과", `<span class="hlKey"><b>통과</b></span>`);
+        out = out.replaceAll("제외", `<span class="hlNeg"><b>제외</b></span>`);
+        out = out.replaceAll("상승", `<span class="hlPos"><b>상승</b></span>`);
+        out = out.replaceAll("하락", `<span class="hlNeg"><b>하락</b></span>`);
+        out = out.replaceAll("긍정", `<span class="hlPos"><b>긍정</b></span>`);
+        out = out.replaceAll("부정", `<span class="hlNeg"><b>부정</b></span>`);
+        out = out.replaceAll("실적", `<span class="hlKey"><b>실적</b></span>`);
+        out = out.replaceAll("가이던스", `<span class="hlKey"><b>가이던스</b></span>`);
+        out = out.replaceAll("수급", `<span class="hlKey"><b>수급</b></span>`);
+        out = out.replaceAll("금리", `<span class="hlKey"><b>금리</b></span>`);
+        out = out.replaceAll("환율", `<span class="hlKey"><b>환율</b></span>`);
+        out = out.replaceAll("원가", `<span class="hlKey"><b>원가</b></span>`);
+        out = out.replaceAll("마진", `<span class="hlKey"><b>마진</b></span>`);
+        out = out.replaceAll("밸류에이션", `<span class="hlKey"><b>밸류에이션</b></span>`);
+        out = out.replaceAll("설비투자", `<span class="hlKey"><b>설비투자</b></span>`);
+        out = out.replaceAll("운전자본", `<span class="hlKey"><b>운전자본</b></span>`);
+        out = out.replaceAll("현금흐름", `<span class="hlKey"><b>현금흐름</b></span>`);
+        out = out.replaceAll("우려", `<span class="hlNeg"><b>우려</b></span>`);
+        out = out.replaceAll("리스크", `<span class="hlNeg"><b>리스크</b></span>`);
+        out = out.replaceAll("부담", `<span class="hlNeg"><b>부담</b></span>`);
+        out = out.replaceAll("재평가", `<span class="hlPos"><b>재평가</b></span>`);
+        return out.replaceAll("\n", "<br/>");
+      }
+      const nlToBr = (s) => emphasizeText(s);
       const fmtForecast = (f) => {
         if (!f) return "-";
-        return nlToBr(f);
+        return emphasizeText(f);
       };
+
+      const letterMap = {
+        a: "에이",
+        b: "비",
+        c: "씨",
+        d: "디",
+        e: "이",
+        f: "에프",
+        g: "지",
+        h: "에이치",
+        i: "아이",
+        j: "제이",
+        k: "케이",
+        l: "엘",
+        m: "엠",
+        n: "엔",
+        o: "오",
+        p: "피",
+        q: "큐",
+        r: "알",
+        s: "에스",
+        t: "티",
+        u: "유",
+        v: "브이",
+        w: "더블유",
+        x: "엑스",
+        y: "와이",
+        z: "지",
+      };
+
+      const commonWordPron = {
+        earnings: "어닝스",
+        guidance: "가이던스",
+        revenue: "리븐뉴",
+        research: "리서치",
+        study: "스터디",
+        paper: "페이퍼",
+        evidence: "이비던스",
+        breakthrough: "브레이크스루",
+        validated: "밸리데이티드",
+        benchmark: "벤치마크",
+        peerreviewed: "피어리뷰드",
+        "peer-reviewed": "피어리뷰드",
+        SEC: "에스이씨",
+        IR: "아이알",
+        Nasdaq: "나스닥",
+      };
+
+      function phoneticizeEnglish(en) {
+        const raw = String(en ?? "").trim();
+        if (!raw) return "";
+        const lower = raw.toLowerCase();
+        if (commonWordPron[raw] !== undefined) return commonWordPron[raw];
+        if (commonWordPron[lower] !== undefined) return commonWordPron[lower];
+
+        // 간단 근사: 단어 단위로 각 문자 읽기(대문자/소문자 동일 처리)
+        // 너무 긴 문구는 가독성을 위해 하이픈 사이에만 분절합니다.
+        const tokens = raw.split(/(\s+)/);
+        return tokens
+          .map((t) => {
+            if (/^\s+$/.test(t)) return t;
+            const cleaned = t.replace(/[^A-Za-z]/g, "");
+            if (!cleaned) return t;
+            const letters = cleaned
+              .toLowerCase()
+              .split("")
+              .map((ch) => letterMap[ch] ?? ch);
+            return letters.join("-");
+          })
+          .join("");
+      }
+
+      function renderEnglishTriplet(en, ko) {
+        const english = String(en ?? "");
+        const koLine = String(ko ?? "");
+        const ph = phoneticizeEnglish(english);
+        return `
+          <div>
+            <div class="headlineEn">${escapeHtml(english)}</div>
+            <div class="headlinePh">${escapeHtml(ph)}</div>
+            <div class="headlineKo">${escapeHtml(koLine || ph)}</div>
+          </div>
+        `;
+      }
 
       function setMarket(next) {
         market = next;
@@ -265,9 +589,11 @@
         const rows = items
           .map((m) => {
             const cls = m.change_pct >= 0 ? "up" : "down";
+            const nameVal = String(m.name ?? "");
+            const nameHtml = /[A-Za-z]/.test(nameVal) ? renderEnglishTriplet(nameVal, "") : escapeHtml(nameVal);
             return `
               <tr>
-                <td>${m.name}</td>
+                <td>${nameHtml}</td>
                 <td>${m.company_type || "-"}</td>
                 <td class="num">${fmtNum(m.close)}</td>
                 <td class="num ${cls}">${fmtPct(m.change_pct)}</td>
@@ -304,9 +630,10 @@
               ? `<ul>${headlinesDetailed
                   .slice(0, 3)
                   .map((h) => {
-                    const label = `[출처: ${h.source}] ${h.title_ko}`;
                     const url = h.url || "#";
-                    return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">${escapeHtml(label)}</a></li>`;
+                    const triplet = renderEnglishTriplet(h.title_raw || h.title_ko || "", h.title_ko || "");
+                    const src = h.source ? `[출처: ${h.source}]` : "";
+                    return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}"><div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>${triplet}</a></li>`;
                   })
                   .join("")}</ul>`
               : `<div class="muted">관련 뉴스 없음</div>`;
@@ -323,11 +650,13 @@
             const shortDetails = f?.short_term?.details || "";
             const midDetails = f?.mid_term?.details || "";
             const longDetails = f?.long_term?.details || "";
+            const nameVal = String(r.name || r.ticker || "");
+            const nameHtml = /[A-Za-z]/.test(nameVal) ? renderEnglishTriplet(nameVal, "") : escapeHtml(nameVal);
 
             return `
               <article class="reason">
                 <div class="reason-title">
-                  ${escapeHtml(r.name || r.ticker)}<span class="muted" style="font-weight:600;"> · ${escapeHtml(r.company_type || "")}</span>
+                  ${nameHtml}<span class="muted" style="font-weight:600;"> · ${escapeHtml(r.company_type || "")}</span>
                 </div>
                 <div class="reason-summary clickable" data-ticker="${escapeHtml(r.ticker)}">
                   ${nlToBr(r.summary_ko || "요약 없음")}
@@ -381,14 +710,19 @@
         const headlinesList = headlinesDetailed.length
           ? headlinesDetailed
               .map((h) => {
-                const label = `[출처: ${h.source}] ${h.title_ko}`;
                 const url = h.url || "#";
-                return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">${escapeHtml(label)}</a></li>`;
+                const triplet = renderEnglishTriplet(h.title_raw || h.title_ko || "", h.title_ko || "");
+                const src = h.source ? `[출처: ${h.source}]` : "";
+                return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}"><div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>${triplet}</a></li>`;
               })
               .join("")
           : `<div class="muted">관련 뉴스 없음</div>`;
 
-        document.getElementById("reasonModalTitle").textContent = `${r.name || r.ticker} · ${r.company_type || ""}`;
+        const nameVal = String(r.name || r.ticker || "");
+        const nameHtml = /[A-Za-z]/.test(nameVal) ? renderEnglishTriplet(nameVal, "") : escapeHtml(nameVal);
+        document.getElementById("reasonModalTitle").innerHTML = `${nameHtml}<span class="muted" style="font-weight:700; margin-left:8px;">${escapeHtml(
+          r.company_type || ""
+        )}</span>`;
         document.getElementById("reasonModalSummary").innerHTML = nlToBr(r.summary_ko || "요약 없음");
         document.getElementById("reasonModalDetails").innerHTML = nlToBr(r.details_ko || "자세한 설명 없음");
         document.getElementById("reasonModalHeadlines").innerHTML = headlinesList.startsWith("<div")
@@ -446,6 +780,22 @@
       btnKR.addEventListener("click", () => setMarket("KR"));
       btnUS.addEventListener("click", () => setMarket("US"));
       btnRefresh.addEventListener("click", () => load());
+
+      if (btnSpeak) {
+        btnSpeak.addEventListener("click", async () => {
+          const gender = voiceGenderEl?.value || "male";
+          const rate = Number(voiceRateEl?.value || "1");
+          const chunks = buildSpeechText(currentReport, market);
+          await speakSequence(chunks, gender, rate);
+        });
+      }
+
+      if (btnStop) {
+        btnStop.addEventListener("click", () => {
+          if ("speechSynthesis" in window) speechSynthesis.cancel();
+          voiceStatus.textContent = "정지됨";
+        });
+      }
 
       load();
     </script>

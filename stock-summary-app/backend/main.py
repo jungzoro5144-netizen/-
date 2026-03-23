@@ -283,7 +283,7 @@ def _forecast_ko(m: Move, market: Market) -> Dict[str, Dict[str, str]]:
         return (
             "용어해설: 수급(주식을 사는/파는 흐름), 가이던스(회사가 제시하는 향후 실적 전망), "
             "마진(이익률), 밸류에이션(주가가 기업가치를 얼마나 반영하는지), "
-            "CAPEX(공장/설비에 쓰는 투자), 운전자본(일상 운영에 필요한 돈), 현금흐름(돈의 실제 유입/유출)."
+            "설비투자(공장/설비에 쓰는 투자), 운전자본(일상 운영에 필요한 돈), 현금흐름(돈의 실제 유입/유출)."
         )
 
     if is_up:
@@ -323,7 +323,7 @@ def _forecast_ko(m: Move, market: Market) -> Dict[str, Dict[str, str]]:
         "- 긍정: 기술/브랜드/공급망처럼 경쟁우위가 누적되면 현금흐름이 안정될 여지가 있습니다.\n"
         f"  왜 긍정적으로 보나? {comps_str} 대비 차별화가 ‘반복 가능한 이익’으로 연결될 때 밸류에이션이 안정되기 때문입니다.\n"
         "- 부정: 산업 사이클이 꺾이면 성장 프리미엄이 줄어들 수 있습니다.\n"
-        f"  왜 부정적으로 보나? 경쟁사가 유사 전략으로 따라오면 격차가 축소되고, CAPEX(설비투자)·운전자본 부담이 커질 수 있기 때문입니다.\n"
+        f"  왜 부정적으로 보나? 경쟁사가 유사 전략으로 따라오면 격차가 축소되고, 설비투자·운전자본 부담이 커질 수 있기 때문입니다.\n"
         f"{glossary_terms()}"
     )
 
@@ -436,6 +436,7 @@ def _fetch_news_for_stock(m: Move, market: Market, limit: int = 3) -> Dict[str, 
         translated.append(
             {
                 "source": p["source"],
+                "title_raw": p.get("title_raw") or "",
                 "title_ko": title_ko,
                 "url": p.get("url") or "",
                 "score": p.get("score", 0),
@@ -475,12 +476,12 @@ def _reason_ko(m: Move, market: Market) -> Dict[str, object]:
         f"검증 결과: 전체 {total}개 후보 중 공신력 기준 통과 {accepted_total}개, 제외 {rejected_total}개. "
         f"{'대체 기준을 사용했습니다(통과 항목이 부족)' if used_fallback else '통과 항목 위주로 사용했습니다'}.\n"
         "검증 기준(요약): "
-        "학술/논문 성격 키워드 또는 검증(논문/연구/peer-reviewed) 키워드, "
-        "IR/실적·가이던스(공식 발표) 성격 키워드를 우선 반영하고, "
+        "학술/논문 성격 키워드 또는 검증(동료심사) 키워드, "
+        "투자자 관계(공식 발표)/실적·가이던스(공식 발표) 성격 키워드를 우선 반영하고, "
         "‘홍보성’ 가능성이 높은 표현은 감점/제외합니다.\n"
         "아래 기사들은 클릭해서 원문 내용을 직접 확인할 수 있습니다.\n"
         "용어해설: 수급(사람들이 주식을 사는/파는 흐름), 가이던스(회사가 앞으로의 실적을 제시하는 범위/전망), "
-        "IR(Investor Relations: 투자자 대상 공식 공지)."
+        "투자자 관계(회사와 투자자 사이의 공식 공지)."
     )
 
     if headlines_detailed:
