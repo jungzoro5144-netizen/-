@@ -81,12 +81,71 @@
         font-variant-numeric: tabular-nums;
       }
       .up {
-        color: #60a5fa;
+        color: #f87171;
         font-weight: 700;
       }
       .down {
-        color: #f87171;
+        color: #60a5fa;
         font-weight: 700;
+      }
+      .clickable {
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .forecast-text {
+        color: #cbd5e1;
+        line-height: 1.45;
+      }
+      .forecast-preview {
+        max-height: 110px;
+        overflow: hidden;
+      }
+      .modalBackdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding: 18px;
+      }
+      .modalBody {
+        width: min(980px, 100%);
+        max-height: 86vh;
+        overflow: auto;
+        background: #0f172a;
+        border: 1px solid #1f2937;
+        border-radius: 16px;
+        padding: 14px 16px 18px;
+      }
+      .modalHeader {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .modalTitle {
+        color: white;
+        font-size: 18px;
+        font-weight: 800;
+      }
+      .closeBtn {
+        cursor: pointer;
+        padding: 6px 10px;
+        border-radius: 10px;
+        background: #1e293b;
+        color: #cbd5e1;
+        font-weight: 700;
+        border: 1px solid #334155;
+      }
+      .headlineLink {
+        color: #93c5fd;
+        text-decoration: none;
+      }
+      .headlineLink:hover {
+        text-decoration: underline;
       }
       .panel {
         margin-top: 14px;
@@ -152,6 +211,8 @@
 
     <script>
       let market = "KR";
+      let reasonByTicker = new Map();
+      let forecastsByTicker = {};
 
       const elContent = document.getElementById("content");
       const elMeta = document.getElementById("meta");
@@ -159,8 +220,21 @@
       const btnUS = document.getElementById("btnUS");
       const btnRefresh = document.getElementById("btnRefresh");
 
+      const escapeHtml = (str) =>
+        String(str ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+
       const fmtNum = (n) => Number(n ?? 0).toLocaleString("ko-KR");
       const fmtPct = (n) => `${n > 0 ? "+" : ""}${Number(n ?? 0).toFixed(2)}%`;
+      const nlToBr = (s) => escapeHtml(s).replaceAll("\n", "<br/>");
+      const fmtForecast = (f) => {
+        if (!f) return "-";
+        return nlToBr(f);
+      };
 
       function setMarket(next) {
         market = next;
@@ -206,16 +280,36 @@
         const rows = reasons
           .map((r) => {
             const f = forecasts[r.ticker] || {};
-            const headlines = (r.headlines_ko || []).map((h) => `<li>${h}</li>`).join("");
+            const headlinesDetailed = r.headlines_detailed || [];
+            const headlinesHtml = headlinesDetailed.length
+              ? `<ul>${headlinesDetailed
+                  .slice(0, 3)
+                  .map((h) => {
+                    const label = `[출처: ${h.source}] ${h.title_ko}`;
+                    const url = h.url || "#";
+                    return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">${escapeHtml(label)}</a></li>`;
+                  })
+                  .join("")}</ul>`
+              : `<div class="muted">관련 뉴스 없음</div>`;
+
+            const previewShort = f.short_term ? fmtForecast(f.short_term) : "-";
+            const previewMid = f.mid_term ? fmtForecast(f.mid_term) : "-";
+            const previewLong = f.long_term ? fmtForecast(f.long_term) : "-";
+
             return `
               <article class="reason">
-                <div class="reason-title">${r.ticker}</div>
-                <div class="reason-summary">${r.summary_ko || "요약 없음"}</div>
-                ${headlines ? `<ul>${headlines}</ul>` : `<div class="muted">관련 뉴스 없음</div>`}
-                <div class="muted" style="margin-top:8px;">
-                  단기: ${f.short_term || "-"}<br/>
-                  중기: ${f.mid_term || "-"}<br/>
-                  장기: ${f.long_term || "-"}
+                <div class="reason-title">${escapeHtml(r.ticker)}</div>
+                <div class="reason-summary clickable" data-ticker="${escapeHtml(r.ticker)}">
+                  ${nlToBr(r.summary_ko || "요약 없음")}
+                </div>
+                ${headlinesHtml}
+                <div class="forecast-text muted" style="margin-top:10px;">
+                  <div><strong>단기</strong>:</div>
+                  <div class="forecast-preview">${previewShort}</div>
+                  <div style="margin-top:8px;"><strong>중기</strong>:</div>
+                  <div class="forecast-preview">${previewMid}</div>
+                  <div style="margin-top:8px;"><strong>장기</strong>:</div>
+                  <div class="forecast-preview">${previewLong}</div>
                 </div>
               </article>
             `;
@@ -230,6 +324,39 @@
         `;
       }
 
+      function openReasonModal(ticker) {
+        const r = reasonByTicker.get(ticker);
+        const f = forecastsByTicker[ticker] || {};
+        if (!r) return;
+
+        const headlinesDetailed = r.headlines_detailed || [];
+        const headlinesList = headlinesDetailed.length
+          ? headlinesDetailed
+              .map((h) => {
+                const label = `[출처: ${h.source}] ${h.title_ko}`;
+                const url = h.url || "#";
+                return `<li><a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">${escapeHtml(label)}</a></li>`;
+              })
+              .join("")
+          : `<div class="muted">관련 뉴스 없음</div>`;
+
+        document.getElementById("reasonModalTitle").textContent = `${r.ticker} 상세`;
+        document.getElementById("reasonModalSummary").innerHTML = nlToBr(r.summary_ko || "요약 없음");
+        document.getElementById("reasonModalDetails").innerHTML = nlToBr(r.details_ko || "자세한 설명 없음");
+        document.getElementById("reasonModalHeadlines").innerHTML = headlinesList.startsWith("<div")
+          ? headlinesList
+          : `<ul>${headlinesList}</ul>`;
+        document.getElementById("reasonModalShort").innerHTML = fmtForecast(f.short_term || "-");
+        document.getElementById("reasonModalMid").innerHTML = fmtForecast(f.mid_term || "-");
+        document.getElementById("reasonModalLong").innerHTML = fmtForecast(f.long_term || "-");
+
+        document.getElementById("reasonModalBackdrop").style.display = "flex";
+      }
+
+      function closeReasonModal() {
+        document.getElementById("reasonModalBackdrop").style.display = "none";
+      }
+
       async function load() {
         elContent.textContent = "불러오는 중...";
         try {
@@ -240,14 +367,23 @@
           const ts = new Date(d.generated_at).toLocaleString("ko-KR", { hour12: false });
           elMeta.textContent = `${d.market_name_ko} 시장 | 생성시각: ${ts}`;
 
+          const combinedReasons = [].concat(d.top_market_cap_reasons || [], d.movers_reasons || []);
+          reasonByTicker = new Map(combinedReasons.map((r) => [r.ticker, r]));
+          forecastsByTicker = d.forecasts || {};
+
           elContent.innerHTML = `
             <div class="grid">
-              ${renderTable("시가총액 상위 10", d.top_market_cap || [])}
               ${renderTable("상승률 상위 10", d.top_gainers || [])}
               ${renderTable("하락률 상위 10", d.top_losers || [])}
+              ${renderTable("시가총액 상위 10", d.top_market_cap || [])}
             </div>
             ${renderReasons("주요 사유 + 단/중/장기 전망", d.top_market_cap_reasons || [], d.forecasts || {})}
           `;
+
+          // 카드의 "주요 사유" 영역 클릭 → 상세 모달
+          elContent.querySelectorAll(".reason-summary").forEach((el) => {
+            el.addEventListener("click", () => openReasonModal(el.dataset.ticker));
+          });
         } catch (e) {
           elContent.innerHTML = `<div class="loading">오류: ${e.message}</div>`;
         }
@@ -259,5 +395,41 @@
 
       load();
     </script>
+
+    <!-- 상세 모달 (주요 사유/기사 링크/전망) -->
+    <div
+      id="reasonModalBackdrop"
+      class="modalBackdrop"
+      style="display: none"
+      onclick="closeReasonModal()"
+    >
+      <div class="modalBody" onclick="event.stopPropagation()">
+        <div class="modalHeader">
+          <div id="reasonModalTitle" class="modalTitle">상세</div>
+          <div class="closeBtn" onclick="closeReasonModal()">닫기</div>
+        </div>
+
+        <div class="panel" style="margin-top: 0; border-radius: 12px;">
+          <h2 style="border-bottom: 0;">주요 사유 요약</h2>
+          <div id="reasonModalSummary" class="reason-summary" style="margin-bottom: 10px;"></div>
+
+          <h2 style="border-bottom: 0;">더 자세한 설명</h2>
+          <div id="reasonModalDetails" class="reason-summary" style="margin-bottom: 10px;"></div>
+
+          <h2 style="border-bottom: 0;">참고 기사(클릭 시 원문)</h2>
+          <div id="reasonModalHeadlines" style="margin-top: 8px;"></div>
+
+          <h2 style="border-bottom: 0; margin-top: 12px;">전망(긍정/부정)</h2>
+          <div class="muted" style="line-height: 1.5;">
+            <div><strong>단기</strong></div>
+            <div id="reasonModalShort" class="forecast-text"></div>
+            <div style="margin-top: 10px;"><strong>중기</strong></div>
+            <div id="reasonModalMid" class="forecast-text"></div>
+            <div style="margin-top: 10px;"><strong>장기</strong></div>
+            <div id="reasonModalLong" class="forecast-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
