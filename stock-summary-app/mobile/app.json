@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "주식 요약 앱",
+    "slug": "stock-summary-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}

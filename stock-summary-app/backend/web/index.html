@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>주식 요약 대시보드</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+        background: #0b1020;
+        color: #e5e7eb;
+      }
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 28px;
+      }
+      .sub {
+        color: #94a3b8;
+        margin-bottom: 14px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .btn {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+        background: #1e293b;
+        color: #e5e7eb;
+        font-weight: 600;
+      }
+      .btn.active {
+        background: #2563eb;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .card {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .card h2 {
+        font-size: 16px;
+        margin: 0;
+        padding: 12px;
+        border-bottom: 1px solid #1f2937;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #1f2937;
+        font-size: 13px;
+        text-align: left;
+      }
+      th {
+        color: #9ca3af;
+        font-weight: 600;
+      }
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .up {
+        color: #60a5fa;
+        font-weight: 700;
+      }
+      .down {
+        color: #f87171;
+        font-weight: 700;
+      }
+      .panel {
+        margin-top: 14px;
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+      }
+      .panel h2 {
+        margin: 0;
+        padding: 12px;
+        font-size: 16px;
+        border-bottom: 1px solid #1f2937;
+      }
+      .reasons {
+        padding: 10px;
+        display: grid;
+        gap: 10px;
+      }
+      .reason {
+        background: #0f172a;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .reason-title {
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .reason-summary {
+        color: #cbd5e1;
+        margin-bottom: 6px;
+        line-height: 1.4;
+      }
+      .reason ul {
+        margin: 0;
+        padding-left: 18px;
+        color: #94a3b8;
+      }
+      .muted {
+        color: #94a3b8;
+      }
+      .loading {
+        padding: 20px;
+      }
+      @media (max-width: 1000px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>주식 요약 대시보드</h1>
+      <div id="meta" class="sub">데이터 로딩 중...</div>
+      <div class="toolbar">
+        <button id="btnKR" class="btn active">대한민국</button>
+        <button id="btnUS" class="btn">미국</button>
+        <button id="btnRefresh" class="btn">새로고침</button>
+      </div>
+      <div id="content" class="loading">불러오는 중...</div>
+    </div>
+
+    <script>
+      let market = "KR";
+
+      const elContent = document.getElementById("content");
+      const elMeta = document.getElementById("meta");
+      const btnKR = document.getElementById("btnKR");
+      const btnUS = document.getElementById("btnUS");
+      const btnRefresh = document.getElementById("btnRefresh");
+
+      const fmtNum = (n) => Number(n ?? 0).toLocaleString("ko-KR");
+      const fmtPct = (n) => `${n > 0 ? "+" : ""}${Number(n ?? 0).toFixed(2)}%`;
+
+      function setMarket(next) {
+        market = next;
+        btnKR.classList.toggle("active", market === "KR");
+        btnUS.classList.toggle("active", market === "US");
+        load();
+      }
+
+      function renderTable(title, items) {
+        const rows = items
+          .map((m) => {
+            const cls = m.change_pct >= 0 ? "up" : "down";
+            return `
+              <tr>
+                <td>${m.name}</td>
+                <td>${m.ticker}</td>
+                <td class="num">${fmtNum(m.close)}</td>
+                <td class="num ${cls}">${fmtPct(m.change_pct)}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        return `
+          <section class="card">
+            <h2>${title}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>종목</th>
+                  <th>티커</th>
+                  <th class="num">종가</th>
+                  <th class="num">등락률</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </section>
+        `;
+      }
+
+      function renderReasons(title, reasons, forecasts) {
+        const rows = reasons
+          .map((r) => {
+            const f = forecasts[r.ticker] || {};
+            const headlines = (r.headlines_ko || []).map((h) => `<li>${h}</li>`).join("");
+            return `
+              <article class="reason">
+                <div class="reason-title">${r.ticker}</div>
+                <div class="reason-summary">${r.summary_ko || "요약 없음"}</div>
+                ${headlines ? `<ul>${headlines}</ul>` : `<div class="muted">관련 뉴스 없음</div>`}
+                <div class="muted" style="margin-top:8px;">
+                  단기: ${f.short_term || "-"}<br/>
+                  중기: ${f.mid_term || "-"}<br/>
+                  장기: ${f.long_term || "-"}
+                </div>
+              </article>
+            `;
+          })
+          .join("");
+
+        return `
+          <section class="panel">
+            <h2>${title}</h2>
+            <div class="reasons">${rows}</div>
+          </section>
+        `;
+      }
+
+      async function load() {
+        elContent.textContent = "불러오는 중...";
+        try {
+          const res = await fetch(market === "KR" ? "/kr/daily-report" : "/us/daily-report");
+          if (!res.ok) throw new Error(`API 오류 (${res.status})`);
+          const d = await res.json();
+
+          const ts = new Date(d.generated_at).toLocaleString("ko-KR", { hour12: false });
+          elMeta.textContent = `${d.market_name_ko} 시장 | 생성시각: ${ts}`;
+
+          elContent.innerHTML = `
+            <div class="grid">
+              ${renderTable("시가총액 상위 10", d.top_market_cap || [])}
+              ${renderTable("상승률 상위 10", d.top_gainers || [])}
+              ${renderTable("하락률 상위 10", d.top_losers || [])}
+            </div>
+            ${renderReasons("주요 사유 + 단/중/장기 전망", d.top_market_cap_reasons || [], d.forecasts || {})}
+          `;
+        } catch (e) {
+          elContent.innerHTML = `<div class="loading">오류: ${e.message}</div>`;
+        }
+      }
+
+      btnKR.addEventListener("click", () => setMarket("KR"));
+      btnUS.addEventListener("click", () => setMarket("US"));
+      btnRefresh.addEventListener("click", () => load());
+
+      load();
+    </script>
+  </body>
+</html>

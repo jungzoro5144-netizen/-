@@ -1,0 +1,14 @@
+# Render.com: Blueprint로 한 번에 웹 서비스 생성
+# https://render.com → New → Blueprint → 이 저장소 연결
+#
+# 주의: 이 저장소 루트가 stable-diffusion-webui 인 경우 그대로 사용.
+# backend만 별도 저장소로 쓰면 dockerContext/dockerfilePath 를 ./ 로 맞추세요.
+
+services:
+  - type: web
+    name: stock-summary-dashboard
+    runtime: docker
+    dockerfilePath: ./stock-summary-app/backend/Dockerfile
+    dockerContext: ./stock-summary-app/backend
+    plan: free
+    healthCheckPath: /api/health
