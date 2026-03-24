@@ -32,6 +32,34 @@
         gap: 8px;
         margin-bottom: 16px;
       }
+      .indexRow {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+      .indexCard {
+        background: #0f172a;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 10px 12px;
+        min-width: 230px;
+      }
+      .indexLabel {
+        color: #cbd5e1;
+        font-weight: 900;
+      }
+      .indexMeta {
+        color: #94a3b8;
+        font-size: 12px;
+        margin-top: 2px;
+      }
+      .indexValue {
+        margin-top: 6px;
+        font-size: 16px;
+        font-weight: 900;
+        color: #e5e7eb;
+      }
       .btn {
         border: 0;
         border-radius: 8px;
@@ -279,6 +307,7 @@
     <div class="wrap">
       <h1>주식 요약 대시보드</h1>
       <div id="meta" class="sub">데이터 로딩 중...</div>
+      <div id="indexRow" class="indexRow"></div>
       <div class="toolbar">
         <button id="btnKR" class="btn active">대한민국</button>
         <button id="btnUS" class="btn">미국</button>
@@ -330,6 +359,7 @@
       const voiceGenderEl = document.getElementById("voiceGender");
       const voiceRateEl = document.getElementById("voiceRate");
       const voiceStatus = document.getElementById("voiceStatus");
+      const indexRowEl = document.getElementById("indexRow");
 
       function refreshVoices() {
         try {
@@ -674,6 +704,28 @@
         `;
       }
 
+      function renderEnglishWithToggle(en, ko, detailId, sourceLabel = "") {
+        const english = String(en ?? "");
+        const koLine = String(ko ?? "");
+        const ph = phoneticizeEnglish(english);
+        const srcHtml = sourceLabel ? `<div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(sourceLabel)}</div>` : "";
+        return `
+          <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
+            <div style="flex:1;">
+              ${srcHtml}
+              <div class="headlineEn">${escapeHtml(english)}</div>
+            </div>
+            <button class="transBtn" onclick="event.preventDefault(); event.stopPropagation(); toggleEnglishDetail('${escapeHtml(detailId)}');">
+              번역
+            </button>
+          </div>
+          <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
+            <div class="headlinePh">${escapeHtml(ph)}</div>
+            <div class="headlineKo">${escapeHtml(koLine || ph)}</div>
+          </div>
+        `;
+      }
+
       function setMarket(next) {
         market = next;
         btnKR.classList.toggle("active", market === "KR");
@@ -683,10 +735,13 @@
 
       function renderTable(title, items) {
         const rows = items
-          .map((m) => {
+          .map((m, idx) => {
             const cls = m.change_pct >= 0 ? "up" : "down";
             const nameVal = String(m.name ?? "");
-            const nameHtml = /[A-Za-z]/.test(nameVal) ? renderEnglishTriplet(nameVal, "") : escapeHtml(nameVal);
+            const detailId = `tbl-${title.replace(/[^a-zA-Z0-9_-]/g, "_")}-${idx}`;
+            const nameHtml = /[A-Za-z]/.test(nameVal)
+              ? renderEnglishWithToggle(nameVal, m.name_ko || "", detailId)
+              : escapeHtml(nameVal);
             return `
               <tr>
                 <td>${nameHtml}</td>
@@ -730,24 +785,13 @@
                     const url = h.url || "#";
                     const en = h.title_raw || h.title_ko || "";
                     const ko = h.title_ko || "";
-                    const ph = phoneticizeEnglish(en);
                     const detailId = `${baseId}-hl-${idx}`;
                     const src = h.source ? `[출처: ${h.source}]` : "";
                     return `
                       <li>
-                        <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
-                          <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
-                            <div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>
-                            <div class="headlineEn">${escapeHtml(en)}</div>
-                          </a>
-                          <button class="transBtn" onclick="event.preventDefault(); event.stopPropagation(); toggleEnglishDetail('${escapeHtml(detailId)}');">
-                            번역
-                          </button>
-                        </div>
-                        <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
-                          <div class="headlinePh">${escapeHtml(ph)}</div>
-                          <div class="headlineKo">${escapeHtml(ko)}</div>
-                        </div>
+                        <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
+                          ${renderEnglishWithToggle(en, ko, detailId, src)}
+                        </a>
                       </li>
                     `;
                   })
@@ -765,7 +809,9 @@
             const midDetails = f?.mid_term?.details || "";
             const longDetails = f?.long_term?.details || "";
             const nameVal = String(r.name || r.ticker || "");
-            const nameHtml = /[A-Za-z]/.test(nameVal) ? renderEnglishTriplet(nameVal, "") : escapeHtml(nameVal);
+            const nameHtml = /[A-Za-z]/.test(nameVal)
+              ? renderEnglishWithToggle(nameVal, r.name_ko || "", `${baseId}-name-ko`)
+              : escapeHtml(nameVal);
 
             return `
               <article class="reason">
@@ -829,24 +875,13 @@
                 const url = h.url || "#";
                 const en = h.title_raw || h.title_ko || "";
                 const ko = h.title_ko || "";
-                const ph = phoneticizeEnglish(en);
                 const detailId = `${baseId}-m-hl-${idx}`;
                 const src = h.source ? `[출처: ${h.source}]` : "";
                 return `
                   <li>
-                    <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
-                      <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
-                        <div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(src)}</div>
-                        <div class="headlineEn">${escapeHtml(en)}</div>
-                      </a>
-                      <button class="transBtn" onclick="event.preventDefault(); event.stopPropagation(); toggleEnglishDetail('${escapeHtml(detailId)}');">
-                        번역
-                      </button>
-                    </div>
-                    <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
-                      <div class="headlinePh">${escapeHtml(ph)}</div>
-                      <div class="headlineKo">${escapeHtml(ko)}</div>
-                    </div>
+                    <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
+                      ${renderEnglishWithToggle(en, ko, detailId, src)}
+                    </a>
                   </li>
                 `;
               })
@@ -854,7 +889,9 @@
           : `<div class="muted">관련 뉴스 없음</div>`;
 
         const nameVal = String(r.name || r.ticker || "");
-        const nameHtml = /[A-Za-z]/.test(nameVal) ? renderEnglishTriplet(nameVal, "") : escapeHtml(nameVal);
+        const nameHtml = /[A-Za-z]/.test(nameVal)
+          ? renderEnglishWithToggle(nameVal, r.name_ko || "", `${baseId}-modal-name-ko`)
+          : escapeHtml(nameVal);
         document.getElementById("reasonModalTitle").innerHTML = `${nameHtml}<span class="muted" style="font-weight:700; margin-left:8px;">${escapeHtml(
           r.company_type || ""
         )}</span>`;
@@ -886,6 +923,25 @@
         el.style.display = el.style.display === "none" ? "block" : "none";
       }
 
+      function renderIndexes(indexes) {
+        if (!indexRowEl) return;
+        const k = indexes?.KOSPI;
+        const n = indexes?.NASDAQ;
+        const card = (v) => {
+          if (!v) return "";
+          const cls = Number(v.change_pct || 0) >= 0 ? "up" : "down";
+          const pct = fmtPct(Number(v.change_pct || 0));
+          return `
+            <div class="indexCard">
+              <div class="indexLabel">${escapeHtml(v.label || "")}</div>
+              <div class="indexMeta">${escapeHtml(v.ticker || "")}</div>
+              <div class="indexValue">${fmtNum(v.close || 0)} <span class="${cls}" style="margin-left:8px;">${pct}</span></div>
+            </div>
+          `;
+        };
+        indexRowEl.innerHTML = `${card(k)}${card(n)}`;
+      }
+
       async function load() {
         elContent.textContent = "불러오는 중...";
         try {
@@ -893,6 +949,7 @@
           if (!res.ok) throw new Error(`API 오류 (${res.status})`);
           const d = await res.json();
           currentReport = d;
+          renderIndexes(d.market_indexes || {});
 
           const ts = new Date(d.generated_at).toLocaleString("ko-KR", { hour12: false });
           elMeta.textContent = `${d.market_name_ko} 시장 | 생성시각: ${ts}`;

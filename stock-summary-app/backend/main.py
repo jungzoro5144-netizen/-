@@ -53,6 +53,19 @@ US_UNIVERSE: Dict[str, str] = {
     "AVGO": "Broadcom",
 }
 
+US_NAME_KO: Dict[str, str] = {
+    "AAPL": "애플",
+    "MSFT": "마이크로소프트",
+    "NVDA": "엔비디아",
+    "AMZN": "아마존",
+    "GOOGL": "알파벳(구글)",
+    "META": "메타",
+    "BRK-B": "버크셔 해서웨이",
+    "TSLA": "테슬라",
+    "LLY": "일라이 릴리",
+    "AVGO": "브로드컴",
+}
+
 COMPANY_TYPE_KR: Dict[str, str] = {
     "005930.KS": "반도체/전자부품(메모리·시스템반도체) + 스마트폰·가전",
     "000660.KS": "반도체(주로 D램·낸드 메모리)",
@@ -230,6 +243,7 @@ MOVES_CACHE_TTL_SECONDS = 60
 _news_cache: Dict[Tuple[Market, str], Tuple[float, Dict[str, Any]]] = {}
 _moves_cache: Dict[Market, Tuple[float, List[Move]]] = {}
 _report_cache: Dict[Market, Tuple[float, Dict[str, Any]]] = {}
+_index_cache: Tuple[float, Dict[str, Any]] | None = None
 
 # 간단한 경쟁/비교 기업 목록(템플릿용). 실제 기업 분석 데이터는 별도 수집이 필요하지만,
 # UI에서 '왜 긍정/부정인지' 문장이 반복되지 않도록 최소한의 비교 기준을 제공합니다.
@@ -264,6 +278,7 @@ COMPETITORS_US: Dict[str, List[str]] = {
 class Move:
     ticker: str
     name: str
+    name_ko: str
     company_type: str
     close: float
     prev_close: float
@@ -535,12 +550,66 @@ def _reason_ko(m: Move, market: Market) -> Dict[str, object]:
     return {
         "ticker": m.ticker,
         "name": m.name,
+        "name_ko": m.name_ko,
         "company_type": m.company_type,
         "summary_ko": summary_ko,
         "headlines_ko": headlines_ko,
         "details_ko": details_ko,
         "headlines_detailed": headlines_detailed,
     }
+
+
+def _mock_benchmark_indexes() -> Dict[str, Any]:
+    return {
+        "KOSPI": {"label": "코스피", "ticker": "^KS11", "close": 2718.44, "change_pct": 0.62},
+        "NASDAQ": {"label": "나스닥", "ticker": "^IXIC", "close": 18220.34, "change_pct": -0.41},
+    }
+
+
+def _fetch_benchmark_indexes() -> Dict[str, Any]:
+    global _index_cache
+    now = time.time()
+    if _index_cache and (now - _index_cache[0]) < MOVES_CACHE_TTL_SECONDS:
+        return _index_cache[1]
+
+    if yf is None:
+        mocked = _mock_benchmark_indexes()
+        _index_cache = (now, mocked)
+        return mocked
+
+    try:
+        data = yf.download(
+            tickers=["^KS11", "^IXIC"],
+            period="5d",
+            interval="1d",
+            auto_adjust=False,
+            group_by="ticker",
+            progress=False,
+            threads=True,
+        )
+    except Exception:
+        data = None
+
+    if data is None or len(data) == 0:
+        mocked = _mock_benchmark_indexes()
+        _index_cache = (now, mocked)
+        return mocked
+
+    def pick(ticker: str, label: str) -> Dict[str, Any]:
+        try:
+            frame = data[ticker].dropna()
+            if len(frame) < 2:
+                raise ValueError("not enough rows")
+            close = float(frame["Close"].iloc[-1])
+            prev = float(frame["Close"].iloc[-2])
+            pct = (close - prev) / prev * 100
+            return {"label": label, "ticker": ticker, "close": round(close, 2), "change_pct": round(pct, 2)}
+        except Exception:
+            return _mock_benchmark_indexes()["KOSPI" if ticker == "^KS11" else "NASDAQ"]
+
+    result = {"KOSPI": pick("^KS11", "코스피"), "NASDAQ": pick("^IXIC", "나스닥")}
+    _index_cache = (now, result)
+    return result
 
 
 def _mock_moves(universe: Dict[str, str], market: Market) -> List[Move]:
@@ -558,6 +627,7 @@ def _mock_moves(universe: Dict[str, str], market: Market) -> List[Move]:
     ]
     out: List[Move] = []
     company_type_map = COMPANY_TYPE_KR if market == "KR" else COMPANY_TYPE_US
+    name_ko_map = US_NAME_KO if market == "US" else {}
     for i, (ticker, name) in enumerate(universe.items()):
         close = float(100 + i * 8)
         pct = seed[i % len(seed)]
@@ -566,6 +636,7 @@ def _mock_moves(universe: Dict[str, str], market: Market) -> List[Move]:
             Move(
                 ticker=ticker,
                 name=name,
+                name_ko=name_ko_map.get(ticker, name),
                 company_type=company_type_map.get(ticker, "업종 미정"),
                 close=round(close, 2),
                 prev_close=round(prev, 2),
@@ -604,6 +675,7 @@ def _fetch_moves(universe: Dict[str, str], market: Market) -> List[Move]:
 
     moves: List[Move] = []
     company_type_map = COMPANY_TYPE_KR if market == "KR" else COMPANY_TYPE_US
+    name_ko_map = US_NAME_KO if market == "US" else {}
     for ticker, name in universe.items():
         try:
             frame = data[ticker].dropna()
@@ -617,6 +689,7 @@ def _fetch_moves(universe: Dict[str, str], market: Market) -> List[Move]:
                 Move(
                     ticker=ticker,
                     name=name,
+                    name_ko=name_ko_map.get(ticker, name),
                     company_type=company_type_map.get(ticker, "업종 미정"),
                     close=round(close, 2),
                     prev_close=round(prev_close, 2),
@@ -652,6 +725,7 @@ def _build_report(market: Market) -> Dict[str, object]:
         "market": market,
         "market_name_ko": market_name,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "market_indexes": _fetch_benchmark_indexes(),
         "top_market_cap": [m.__dict__ for m in top_market_cap],
         "top_market_cap_reasons": [reason_map[m.ticker] for m in top_market_cap],
         "top_gainers": [m.__dict__ for m in top_gainers],
