@@ -246,20 +246,22 @@
         border: 1px solid #334155;
       }
       .headlineLink {
-        color: #93c5fd;
+        color: #3e2f1f;
         text-decoration: none;
         display: block;
         padding: 6px 8px;
         border-radius: 10px;
+        border: 1px solid #e5d7bf;
+        background: #fff8ec;
       }
       .headlineLink:hover {
         text-decoration: underline;
-        background: rgba(147, 197, 253, 0.08);
+        background: #f7eddc;
       }
       .transBtn {
-        background: #1e293b;
-        border: 1px solid #334155;
-        color: #e5e7eb;
+        background: #8b6b3f;
+        border: 1px solid #6f5531;
+        color: #fff;
         border-radius: 10px;
         padding: 6px 10px;
         font-weight: 900;
@@ -267,26 +269,36 @@
         white-space: nowrap;
       }
       .transBtn:hover {
-        background: #0f172a;
+        background: #705432;
       }
       .headlineEn {
         font-weight: 900;
-        color: #e5e7eb;
+        color: #2f2418;
         line-height: 1.2;
       }
       .headlinePh {
         font-weight: 800;
-        color: #93c5fd;
-        font-size: 12px;
+        color: #5e4a2e;
+        font-size: 13px;
         margin-top: 2px;
         line-height: 1.2;
       }
       .headlineKo {
-        font-weight: 700;
-        color: #cbd5e1;
-        font-size: 12px;
+        font-weight: 800;
+        color: #423321;
+        font-size: 13px;
         margin-top: 2px;
         line-height: 1.25;
+      }
+      .headlineGlossary {
+        margin-top: 6px;
+        background: #fdf4e6;
+        border: 1px solid #e5d7bf;
+        border-radius: 8px;
+        padding: 6px 8px;
+        color: #584732;
+        font-size: 12px;
+        line-height: 1.35;
       }
       .panel {
         margin-top: 14px;
@@ -312,21 +324,27 @@
         padding: 10px;
       }
       .reason-title {
-        font-weight: 700;
+        font-weight: 900;
+        color: #302417;
         margin-bottom: 6px;
       }
       .reason-summary {
-        color: #cbd5e1;
+        color: #34281b;
         margin-bottom: 6px;
         line-height: 1.4;
+        font-weight: 700;
+        background: #f8efe0;
+        border: 1px solid #e5d7bf;
+        border-radius: 10px;
+        padding: 8px 10px;
       }
       .reason ul {
         margin: 0;
         padding-left: 18px;
-        color: #94a3b8;
+        color: #4f412f;
       }
       .muted {
-        color: var(--muted);
+        color: #655846;
       }
       .summaryRow {
         display: grid;
@@ -619,10 +637,63 @@
         const english = String(en ?? "");
         const koLine = String(ko ?? "");
         const ph = phoneticizeEnglish(english);
+        const hasEnglish = /[A-Za-z]/.test(english);
         const srcHtml = sourceLabel ? `<div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(sourceLabel)}</div>` : "";
         const titleHtml = url
           ? `<a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}"><div class="headlineEn">${escapeHtml(english)}</div></a>`
           : `<div class="headlineEn">${escapeHtml(english)}</div>`;
+
+        const dict = {
+          earnings: "실적 발표",
+          revenue: "매출",
+          guidance: "향후 실적 전망",
+          margin: "이익률",
+          demand: "수요",
+          supply: "공급",
+          growth: "성장",
+          decline: "하락",
+          rise: "상승",
+          forecast: "전망",
+          research: "연구",
+          study: "연구",
+          trial: "임상/시험",
+          investor: "투자자",
+          conference: "회의/컨퍼런스",
+          call: "통화(컨콜)",
+          report: "보고서",
+          results: "결과(실적 결과)",
+          estimate: "추정치",
+          guidancecut: "전망 하향",
+          upgrade: "상향 조정",
+          downgrade: "하향 조정",
+          outlook: "전망",
+        };
+        const words = english.match(/[A-Za-z][A-Za-z-]+/g) || [];
+        const normalizedWords = words.map((w) => w.toLowerCase().replaceAll("-", ""));
+        const glossaryPairs = [];
+        for (let i = 0; i < words.length; i++) {
+          const key = normalizedWords[i];
+          if (dict[key] && !glossaryPairs.find((x) => x.key === key)) {
+            glossaryPairs.push({ key, word: words[i], meaning: dict[key] });
+          }
+        }
+        const glossaryHtml = glossaryPairs.length
+          ? `<div class="headlineGlossary"><b>핵심 단어 뜻</b><br/>${glossaryPairs
+              .slice(0, 4)
+              .map((g) => `${escapeHtml(g.word)}: ${escapeHtml(g.meaning)}`)
+              .join(" · ")}</div>`
+          : `<div class="headlineGlossary"><b>학습 팁</b><br/>문장을 소리내어 읽고, 아래 한글 번역과 비교해 핵심 단어를 익혀보세요.</div>`;
+
+        if (!hasEnglish) {
+          return `
+            <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
+              <div style="flex:1;">
+                ${srcHtml}
+                ${titleHtml}
+              </div>
+            </div>
+          `;
+        }
         return `
           <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
             <div style="flex:1;">
@@ -636,6 +707,7 @@
           <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
             <div class="headlinePh">${escapeHtml(ph)}</div>
             <div class="headlineKo">${escapeHtml(koLine || ph)}</div>
+            ${glossaryHtml}
           </div>
         `;
       }
