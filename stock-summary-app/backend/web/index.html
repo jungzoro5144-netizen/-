@@ -496,6 +496,7 @@
       };
 
       const commonWordPron = {
+        love: "러브",
         earnings: "어닝스",
         guidance: "가이던스",
         revenue: "리븐뉴",
@@ -524,89 +525,90 @@
           const cleaned = token.replace(/[^A-Za-z]/g, "");
           if (!cleaned) return token;
           const s = cleaned.toLowerCase();
+          if (commonWordPron[s] !== undefined) return commonWordPron[s];
 
-          // 자주 등장하는 조합(발음 근사)을 우선 치환
-          const patterns = [
-            ["tion", "션"],
-            ["sion", "션"],
-            ["ture", "처"],
-            ["tch", "치"],
-            ["ch", "치"],
-            ["sh", "시"],
-            ["th", s.startsWith("th") ? "더" : "스"],
-            ["ph", "프"],
-            ["ng", "응"],
-            ["ck", "크"],
-            ["qu", "쿠"],
-            ["ai", "에이"],
-            ["ay", "에이"],
-            ["ee", "이"],
-            ["ea", "이"],
-            ["oo", "우"],
-            ["ou", "아우"],
-            ["oi", "오이"],
-            ["ua", "우아"],
-            ["ar", "아르"],
-            ["or", "오르"],
-            ["er", "어"],
-            ["ir", "이르"],
-            ["ur", "어"],
-            ["al", "알"],
-            ["el", "엘"],
-            ["il", "일"],
-          ];
+          // 영어 발음에 가까운 한글 표기를 위한 간단한 규칙 기반 변환
+          let t = s
+            .replace(/tion/g, "션")
+            .replace(/sion/g, "전")
+            .replace(/ture/g, "처")
+            .replace(/sure/g, "셔")
+            .replace(/dge/g, "지")
+            .replace(/ch/g, "치")
+            .replace(/sh/g, "쉬")
+            .replace(/th/g, "더")
+            .replace(/ph/g, "프")
+            .replace(/ck/g, "크")
+            .replace(/qu/g, "쿠")
+            .replace(/ng/g, "ㅇ")
+            .replace(/ough/g, "오")
+            .replace(/igh/g, "아이")
+            .replace(/ee/g, "이")
+            .replace(/ea/g, "이")
+            .replace(/oo/g, "우")
+            .replace(/ou/g, "아우")
+            .replace(/oi/g, "오이")
+            .replace(/ow/g, "오우")
+            .replace(/ai/g, "에이")
+            .replace(/ay/g, "에이")
+            .replace(/au/g, "오")
+            .replace(/ar/g, "아")
+            .replace(/or/g, "오")
+            .replace(/er/g, "어")
+            .replace(/ir/g, "어")
+            .replace(/ur/g, "어");
 
-          const vowelMap = { a: "애", e: "에", i: "이", o: "오", u: "우", y: "이" };
-          const consonantDefault = {
+          const singleMap = {
+            a: "애",
             b: "브",
             c: "크",
-            d: "디",
-            f: "에프",
+            d: "드",
+            e: "에",
+            f: "프",
             g: "그",
-            h: "에이치",
-            j: "제이",
-            k: "케이",
-            l: "엘",
-            m: "엠",
-            n: "엔",
-            p: "피",
-            q: "큐",
-            r: "아르",
-            s: "에스",
-            t: "티",
-            v: "브이",
-            w: "더블유",
-            x: "엑스",
-            z: "지",
+            h: "ㅎ",
+            i: "이",
+            j: "즈",
+            k: "크",
+            l: "ㄹ",
+            m: "ㅁ",
+            n: "ㄴ",
+            o: "오",
+            p: "프",
+            q: "쿠",
+            r: "ㄹ",
+            s: "스",
+            t: "트",
+            u: "우",
+            v: "브",
+            w: "우",
+            x: "크스",
+            y: "이",
+            z: "즈",
           };
+          t = t
+            .split("")
+            .map((ch) => singleMap[ch] || ch)
+            .join("");
 
-          let out = "";
-          let i = 0;
-          while (i < s.length) {
-            let matched = false;
-            for (const [pat, rep] of patterns) {
-              if (s.startsWith(pat, i)) {
-                out += rep;
-                i += pat.length;
-                matched = true;
-                break;
-              }
-            }
-            if (matched) continue;
+          // 자주 생기는 어색한 조합 정리 (LOVE -> 러브 류)
+          t = t
+            .replace(/오ㅂ$/g, "오브")
+            .replace(/애ㅂ$/g, "애브")
+            .replace(/어ㅂ$/g, "어브")
+            .replace(/ㅂ$/g, "브")
+            .replace(/ㄹ브/g, "러브")
+            .replace(/ㄹ트/g, "트")
+            .replace(/ㅎ/g, "")
+            .replace(/ㅇ/g, "응")
+            .replace(/ㄹ/g, "르")
+            .replace(/ㅁ/g, "음")
+            .replace(/ㄴ/g, "은")
+            .replace(/\s+/g, " ")
+            .trim();
 
-            const ch = s[i];
-            const next = s[i + 1] || "";
-            if (vowelMap[ch]) {
-              out += vowelMap[ch];
-            } else if (ch === "c") {
-              // c는 e/i 앞이면 '씨', 그 외는 '크'로 근사
-              out += ["e", "i", "y"].includes(next) ? "씨" : "크";
-            } else {
-              out += consonantDefault[ch] || ch;
-            }
-            i += 1;
-          }
-          return out;
+          if (t.endsWith("브브")) t = t.slice(0, -1);
+          return t || token;
         };
 
         // 문장/구두점 포함 시 토큰 단위로 처리
@@ -618,6 +620,14 @@
           })
           .join("")
           .replaceAll(/\s+/g, " ");
+      }
+
+      function renderStudyTriplet(english, ph, koLine) {
+        const meaning = koLine || ph;
+        return `
+          <div class="headlinePh">${escapeHtml(english)} -> ${escapeHtml(ph)} -> ${escapeHtml(meaning)}</div>
+          <div class="headlineKo">원문 -> 발음 -> 뜻</div>
+        `;
       }
 
       function renderEnglishTriplet(en, ko) {
@@ -705,8 +715,7 @@
             </button>
           </div>
           <div id="${escapeHtml(detailId)}" class="muted" style="display:none; margin-top:6px;">
-            <div class="headlinePh">${escapeHtml(ph)}</div>
-            <div class="headlineKo">${escapeHtml(koLine || ph)}</div>
+            ${renderStudyTriplet(english, ph, koLine)}
             ${glossaryHtml}
           </div>
         `;
