@@ -659,8 +659,9 @@
       function renderStudyTriplet(english, ph, koLine) {
         const meaning = koLine || ph;
         return `
-          <div class="headlinePh">${escapeHtml(english)} -> ${escapeHtml(ph)} -> ${escapeHtml(meaning)}</div>
-          <div class="headlineKo">원문 -> 발음 -> 뜻</div>
+          <div class="headlineKo"><b>원문</b> ${escapeHtml(english)}</div>
+          <div class="headlinePh"><b>발음</b> ${escapeHtml(ph)}</div>
+          <div class="headlineKo"><b>번역</b> ${escapeHtml(meaning)}</div>
         `;
       }
 
