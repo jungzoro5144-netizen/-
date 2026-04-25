@@ -6,13 +6,20 @@
     <title>주식 요약 대시보드</title>
     <style>
       :root {
-        color-scheme: dark;
+        color-scheme: light;
+        --bg: #f4efe6;
+        --panel: #fffaf0;
+        --panel-2: #f8f1e5;
+        --line: #dccfb9;
+        --text: #3b2f1f;
+        --muted: #7a6a55;
+        --accent: #8b6b3f;
       }
       body {
         margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
-        background: #0b1020;
-        color: #e5e7eb;
+        background: var(--bg);
+        color: var(--text);
       }
       .wrap {
         max-width: 1200px;
@@ -91,12 +98,14 @@
         border-radius: 8px;
         padding: 8px 12px;
         cursor: pointer;
-        background: #1e293b;
-        color: #e5e7eb;
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--line);
         font-weight: 600;
       }
       .btn.active {
-        background: #2563eb;
+        background: #5c4a2f;
+        color: #fff;
       }
       .grid {
         display: grid;
@@ -104,8 +113,8 @@
         gap: 12px;
       }
       .card {
-        background: #111827;
-        border: 1px solid #1f2937;
+        background: var(--panel);
+        border: 1px solid var(--line);
         border-radius: 10px;
         overflow: hidden;
       }
@@ -127,7 +136,7 @@
         text-align: left;
       }
       th {
-        color: #9ca3af;
+        color: var(--muted);
         font-weight: 600;
       }
       .num {
@@ -281,8 +290,8 @@
       }
       .panel {
         margin-top: 14px;
-        background: #111827;
-        border: 1px solid #1f2937;
+        background: var(--panel);
+        border: 1px solid var(--line);
         border-radius: 10px;
       }
       .panel h2 {
@@ -297,8 +306,8 @@
         gap: 10px;
       }
       .reason {
-        background: #0f172a;
-        border: 1px solid #1f2937;
+        background: #fffdf8;
+        border: 1px solid var(--line);
         border-radius: 8px;
         padding: 10px;
       }
@@ -317,12 +326,37 @@
         color: #94a3b8;
       }
       .muted {
-        color: #94a3b8;
+        color: var(--muted);
+      }
+      .summaryRow {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .summaryCard {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .summaryLabel {
+        color: var(--muted);
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .summaryValue {
+        margin-top: 4px;
+        font-weight: 900;
+        font-size: 18px;
       }
       .loading {
         padding: 20px;
       }
       @media (max-width: 1000px) {
+        .summaryRow {
+          grid-template-columns: 1fr;
+        }
         .grid {
           grid-template-columns: 1fr;
         }
@@ -333,11 +367,20 @@
     <div class="wrap">
       <h1>주식 요약 대시보드</h1>
       <div id="meta" class="sub">데이터 로딩 중...</div>
+      <div id="summaryRow" class="summaryRow"></div>
       <div id="indexRow" class="indexRow"></div>
       <div class="toolbar">
         <button id="btnKR" class="btn active">대한민국</button>
         <button id="btnUS" class="btn">미국</button>
         <button id="btnRefresh" class="btn">새로고침</button>
+        <button id="btnSimple" class="btn active">핵심만 보기</button>
+        <label class="btn" style="display:inline-flex; align-items:center; gap:8px;">
+          표시 개수
+          <select id="rowLimit" style="border:0; background:transparent; color:inherit; font-weight:700;">
+            <option value="5">5개</option>
+            <option value="10" selected>10개</option>
+          </select>
+        </label>
       </div>
       <div id="content" class="loading">불러오는 중...</div>
     </div>
@@ -347,177 +390,20 @@
       let reasonByTicker = new Map();
       let forecastsByTicker = {};
       let currentReport = null;
-
-      let availableVoices = [];
-      let voiceByGenderCache = { male: null, female: null };
+      let rowLimit = 10;
+      let simpleMode = true;
 
       const elContent = document.getElementById("content");
       const elMeta = document.getElementById("meta");
+      const summaryRowEl = document.getElementById("summaryRow");
       const btnKR = document.getElementById("btnKR");
       const btnUS = document.getElementById("btnUS");
       const btnRefresh = document.getElementById("btnRefresh");
-      const btnSpeak = document.getElementById("btnSpeak");
-      const btnStop = document.getElementById("btnStop");
-      const voiceGenderEl = document.getElementById("voiceGender");
-      const voiceRateEl = document.getElementById("voiceRate");
-      const voiceStatus = document.getElementById("voiceStatus");
+      const btnSimple = document.getElementById("btnSimple");
+      const rowLimitEl = document.getElementById("rowLimit");
       const indexRowEl = document.getElementById("indexRow");
 
-      function refreshVoices() {
-        try {
-          availableVoices = speechSynthesis.getVoices() || [];
-          voiceByGenderCache = { male: null, female: null };
-        } catch (e) {
-          availableVoices = [];
-        }
-      }
-
-      if ("speechSynthesis" in window) {
-        refreshVoices();
-        speechSynthesis.onvoiceschanged = refreshVoices;
-      }
-
-      function pickVoice(gender) {
-        const koVoices = (availableVoices || []).filter((v) => (v.lang || "").toLowerCase().startsWith("ko"));
-        const candidates = koVoices.length ? koVoices : availableVoices;
-        if (!candidates || candidates.length === 0) return null;
-
-        const isFemale = (name = "") => /female|woman|여성|feminine|zira|sara|soyoung|yuna|aria/i.test(name);
-        const isMale = (name = "") => /male|man|남성|masculine|hyeon|jinho|daniel|jun|hyun/i.test(name);
-
-        if (gender === "female") {
-          const femaleExact = candidates.find((v) => isFemale(v.name || ""));
-          if (femaleExact) return femaleExact;
-          const nonMale = candidates.find((v) => !isMale(v.name || ""));
-          return nonMale || candidates[0] || null;
-        }
-
-        // 남성 선택 시 여성 음성으로 잘못 나오는 케이스를 줄이기 위해
-        // 1) male 명시 음성 우선 2) female 표기 음성은 제외한 후보 사용
-        const maleExact = candidates.find((v) => isMale(v.name || ""));
-        if (maleExact) return maleExact;
-
-        const notFemale = candidates.find((v) => !isFemale(v.name || ""));
-        return notFemale || candidates[0] || null;
-      }
-
-      function normalizeForSpeech(s) {
-        return String(s ?? "")
-          .replaceAll(/\s+/g, " ")
-          .replaceAll(/[\r\n]+/g, " ")
-          .trim();
-      }
-
-      function stripValidationForSpeech(detailsKo) {
-        const s = String(detailsKo ?? "");
-        const before = s.split("검증 결과:")[0];
-        const before2 = before.split("용어해설:")[0];
-        return normalizeForSpeech(before2);
-      }
-
-      function buildSpeechText(report, market) {
-        if (!report) return "";
-
-        const isKR = market === "KR";
-        const gainers = report.top_gainers || [];
-        const losers = report.top_losers || [];
-        const reasonsAll = [].concat(report.top_market_cap_reasons || [], report.movers_reasons || []);
-        const reasonMap = new Map(reasonsAll.map((r) => [r.ticker, r]));
-
-        const title = isKR ? "대한민국 시장" : "미국 시장";
-        const speedIntro = "";
-
-        function speakName(nameVal) {
-          const s = String(nameVal ?? "");
-          return /[A-Za-z]/.test(s) ? phoneticizeEnglish(s) : s;
-        }
-
-        let chunks = [];
-
-        // 0) 오늘의 주요 이슈 먼저 브리핑
-        const keyIssues = [...gainers.slice(0, 5), ...losers.slice(0, 5)]
-          .sort((a, b) => Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0))
-          .slice(0, 3)
-          .map((m) => {
-            const r = reasonMap.get(m.ticker);
-            const direction = (m.change_pct || 0) >= 0 ? "상승" : "하락";
-            const brief = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
-            return `${normalizeForSpeech(speakName(m.name))} ${direction} 이슈. ${brief}`;
-          });
-        chunks.push(`${title} 오늘의 주요 이슈 브리핑입니다. ${normalizeForSpeech(keyIssues.join(" "))}`);
-
-        // 1) 상세 브리핑 - 상승율 상위 10
-        let t1 = `${title} 상세 브리핑입니다. 먼저 상승율 상위 ${gainers.length}개 종목입니다. `;
-        gainers.slice(0, 10).forEach((m, idx) => {
-          const r = reasonMap.get(m.ticker);
-          const why = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
-          t1 += `${idx + 1}위. ${normalizeForSpeech(speakName(m.name))}. ${why ? "이유: " + why : ""} `;
-        });
-        chunks.push(normalizeForSpeech(t1) + ".");
-
-        // 2) 상세 브리핑 - 하락율 상위 10
-        let t2 = `다음은 하락율 상위 ${losers.length}개 종목입니다. `;
-        losers.slice(0, 10).forEach((m, idx) => {
-          const r = reasonMap.get(m.ticker);
-          const why = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
-          t2 += `${idx + 1}위. ${normalizeForSpeech(speakName(m.name))}. ${why ? "이유: " + why : ""} `;
-        });
-        chunks.push(normalizeForSpeech(t2) + ".");
-
-        // 3) 상세 브리핑 - 상승/하락 주요 내용
-        const gainersMain = gainers.slice(0, 3).map((m) => {
-          const r = reasonMap.get(m.ticker);
-          return `${normalizeForSpeech(speakName(m.name))} 중요 포인트: ${stripValidationForSpeech(r?.details_ko)}.`;
-        });
-        const losersMain = losers.slice(0, 3).map((m) => {
-          const r = reasonMap.get(m.ticker);
-          return `${normalizeForSpeech(speakName(m.name))} 중요 포인트: ${stripValidationForSpeech(r?.details_ko)}.`;
-        });
-
-        chunks.push(`상승 주요 내용입니다. ${normalizeForSpeech(gainersMain.join(" "))}`);
-        chunks.push(`하락 주요 내용입니다. ${normalizeForSpeech(losersMain.join(" "))}`);
-
-        return chunks.filter(Boolean);
-      }
-
-      function speakOne(text, gender, rate) {
-        return new Promise((resolve) => {
-          if (!text || !("speechSynthesis" in window)) return resolve();
-
-          speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance(text);
-          utter.lang = "ko-KR";
-          utter.rate = rate;
-          utter.pitch = gender === "female" ? 1.15 : 0.9;
-          const v = pickVoice(gender);
-          if (v) utter.voice = v;
-          if (voiceStatus && v) {
-            voiceStatus.textContent = `음성으로 읽는 중입니다... (${gender === "female" ? "여성" : "남성"} / ${v.name})`;
-          }
-          utter.onend = () => resolve();
-          utter.onerror = () => resolve();
-          speechSynthesis.speak(utter);
-        });
-      }
-
-      async function speakSequence(textChunks, gender, rate) {
-        if (!textChunks || !textChunks.length) {
-          voiceStatus.textContent = "읽을 내용이 없습니다. 먼저 데이터를 불러오세요.";
-          return;
-        }
-        voiceStatus.textContent = "음성으로 읽는 중입니다...";
-        for (const ch of textChunks) {
-          // 너무 긴 문장은 끊길 수 있어 짧게 쪼갬
-          const parts = String(ch).split(/(?<=[.!?])\s+/).filter(Boolean);
-          const small = parts.length ? parts : [ch];
-          for (const s of small.slice(0, 8)) {
-            // rate/pitch 적용 유지
-            // eslint-disable-next-line no-await-in-loop
-            await speakOne(s, gender, rate);
-          }
-        }
-        voiceStatus.textContent = "읽기 완료";
-      }
+      // 음성 요약 기능 제거(요청 반영)
 
       const escapeHtml = (str) =>
         String(str ?? "")
@@ -763,6 +649,7 @@
 
       function renderTable(title, items) {
         const rows = items
+          .slice(0, rowLimit)
           .map((m) => {
             const cls = m.change_pct >= 0 ? "up" : "down";
             const nameVal = String(m.name ?? "");
@@ -798,7 +685,8 @@
 
       function renderReasons(title, reasons, forecasts) {
         const safeId = (s) => String(s ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
-        const rows = reasons
+        const shownReasons = simpleMode ? reasons.slice(0, 6) : reasons;
+        const rows = shownReasons
           .map((r) => {
             const f = forecasts[r.ticker] || {};
             const headlinesDetailed = r.headlines_detailed || [];
@@ -849,7 +737,7 @@
                   <div class="forecast-toggle clickable" onclick="toggleForecastDetails('${shortBlockId}')">
                     ${escapeHtml(shortSummary)}
                   </div>
-                  <div id="${shortBlockId}" class="forecast-details" style="display:none;">
+                  <div id="${shortBlockId}" class="forecast-details" style="display:${simpleMode ? "none" : "block"};">
                     ${fmtForecast(shortDetails)}
                   </div>
 
@@ -857,7 +745,7 @@
                   <div class="forecast-toggle clickable" onclick="toggleForecastDetails('${midBlockId}')">
                     ${escapeHtml(midSummary)}
                   </div>
-                  <div id="${midBlockId}" class="forecast-details" style="display:none;">
+                  <div id="${midBlockId}" class="forecast-details" style="display:${simpleMode ? "none" : "block"};">
                     ${fmtForecast(midDetails)}
                   </div>
 
@@ -865,7 +753,7 @@
                   <div class="forecast-toggle clickable" onclick="toggleForecastDetails('${longBlockId}')">
                     ${escapeHtml(longSummary)}
                   </div>
-                  <div id="${longBlockId}" class="forecast-details" style="display:none;">
+                  <div id="${longBlockId}" class="forecast-details" style="display:${simpleMode ? "none" : "block"};">
                     ${fmtForecast(longDetails)}
                   </div>
                 </div>
@@ -1021,6 +909,30 @@
         indexRowEl.innerHTML = `${card(k)}${card(kd)}${card(n)}`;
       }
 
+      function renderSummaryCards(report) {
+        if (!summaryRowEl || !report) return;
+        const g = report.top_gainers || [];
+        const l = report.top_losers || [];
+        const strongestUp = g.length ? g[0] : null;
+        const strongestDown = l.length ? l[0] : null;
+        const bias = (g.length ? g.filter((x) => x.change_pct > 0).length : 0) - (l.length ? l.filter((x) => x.change_pct < 0).length : 0);
+        const marketTone = bias > 0 ? "상승 우세" : bias < 0 ? "하락 우세" : "혼조";
+        summaryRowEl.innerHTML = `
+          <div class="summaryCard">
+            <div class="summaryLabel">오늘 시장 톤</div>
+            <div class="summaryValue">${marketTone}</div>
+          </div>
+          <div class="summaryCard">
+            <div class="summaryLabel">최대 상승</div>
+            <div class="summaryValue">${strongestUp ? escapeHtml(strongestUp.name_ko || strongestUp.name) + " " + fmtPct(strongestUp.change_pct) : "-"}</div>
+          </div>
+          <div class="summaryCard">
+            <div class="summaryLabel">최대 하락</div>
+            <div class="summaryValue">${strongestDown ? escapeHtml(strongestDown.name_ko || strongestDown.name) + " " + fmtPct(strongestDown.change_pct) : "-"}</div>
+          </div>
+        `;
+      }
+
       async function load() {
         elContent.textContent = "불러오는 중...";
         try {
@@ -1029,6 +941,7 @@
           const d = await res.json();
           currentReport = d;
           renderIndexes(d.market_indexes || {});
+          renderSummaryCards(d);
 
           const ts = new Date(d.generated_at).toLocaleString("ko-KR", { hour12: false });
           elMeta.textContent = `${d.market_name_ko} 시장 | 생성시각: ${ts}`;
@@ -1058,6 +971,16 @@
       btnKR.addEventListener("click", () => setMarket("KR"));
       btnUS.addEventListener("click", () => setMarket("US"));
       btnRefresh.addEventListener("click", () => load());
+      btnSimple.addEventListener("click", () => {
+        simpleMode = !simpleMode;
+        btnSimple.classList.toggle("active", simpleMode);
+        btnSimple.textContent = simpleMode ? "핵심만 보기" : "전체 보기";
+        load();
+      });
+      rowLimitEl.addEventListener("change", () => {
+        rowLimit = Number(rowLimitEl.value || "10");
+        load();
+      });
 
       load();
     </script>
