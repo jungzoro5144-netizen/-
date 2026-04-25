@@ -380,15 +380,23 @@
         const candidates = koVoices.length ? koVoices : availableVoices;
         if (!candidates || candidates.length === 0) return null;
 
+        const isFemale = (name = "") => /female|woman|여성|feminine|zira|sara|soyoung|yuna|aria/i.test(name);
+        const isMale = (name = "") => /male|man|남성|masculine|hyeon|jinho|daniel|jun|hyun/i.test(name);
+
         if (gender === "female") {
-          const female = candidates.find((v) => /female|woman|여성|feminine/i.test(v.name || ""));
-          if (female) return female;
-          return candidates.find((v) => (v.name || "").toLowerCase().includes("woman")) || candidates[0] || null;
+          const femaleExact = candidates.find((v) => isFemale(v.name || ""));
+          if (femaleExact) return femaleExact;
+          const nonMale = candidates.find((v) => !isMale(v.name || ""));
+          return nonMale || candidates[0] || null;
         }
 
-        const male = candidates.find((v) => /male|man|남성|masculine/i.test(v.name || ""));
-        if (male) return male;
-        return candidates[0] || null;
+        // 남성 선택 시 여성 음성으로 잘못 나오는 케이스를 줄이기 위해
+        // 1) male 명시 음성 우선 2) female 표기 음성은 제외한 후보 사용
+        const maleExact = candidates.find((v) => isMale(v.name || ""));
+        if (maleExact) return maleExact;
+
+        const notFemale = candidates.find((v) => !isFemale(v.name || ""));
+        return notFemale || candidates[0] || null;
       }
 
       function normalizeForSpeech(s) {
@@ -424,8 +432,20 @@
 
         let chunks = [];
 
-        // 1) 상승율 상위 10
-        let t1 = `${title}에서 상승율 상위 ${gainers.length}개 종목입니다. `;
+        // 0) 오늘의 주요 이슈 먼저 브리핑
+        const keyIssues = [...gainers.slice(0, 5), ...losers.slice(0, 5)]
+          .sort((a, b) => Math.abs(b.change_pct || 0) - Math.abs(a.change_pct || 0))
+          .slice(0, 3)
+          .map((m) => {
+            const r = reasonMap.get(m.ticker);
+            const direction = (m.change_pct || 0) >= 0 ? "상승" : "하락";
+            const brief = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
+            return `${normalizeForSpeech(speakName(m.name))} ${direction} 이슈. ${brief}`;
+          });
+        chunks.push(`${title} 오늘의 주요 이슈 브리핑입니다. ${normalizeForSpeech(keyIssues.join(" "))}`);
+
+        // 1) 상세 브리핑 - 상승율 상위 10
+        let t1 = `${title} 상세 브리핑입니다. 먼저 상승율 상위 ${gainers.length}개 종목입니다. `;
         gainers.slice(0, 10).forEach((m, idx) => {
           const r = reasonMap.get(m.ticker);
           const why = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
@@ -433,8 +453,8 @@
         });
         chunks.push(normalizeForSpeech(t1) + ".");
 
-        // 2) 하락율 상위 10
-        let t2 = `${title}에서 하락율 상위 ${losers.length}개 종목입니다. `;
+        // 2) 상세 브리핑 - 하락율 상위 10
+        let t2 = `다음은 하락율 상위 ${losers.length}개 종목입니다. `;
         losers.slice(0, 10).forEach((m, idx) => {
           const r = reasonMap.get(m.ticker);
           const why = r?.summary_ko ? normalizeForSpeech(r.summary_ko) : "";
@@ -442,7 +462,7 @@
         });
         chunks.push(normalizeForSpeech(t2) + ".");
 
-        // 3) 상승/하락 주요 내용
+        // 3) 상세 브리핑 - 상승/하락 주요 내용
         const gainersMain = gainers.slice(0, 3).map((m) => {
           const r = reasonMap.get(m.ticker);
           return `${normalizeForSpeech(speakName(m.name))} 중요 포인트: ${stripValidationForSpeech(r?.details_ko)}.`;
@@ -469,6 +489,9 @@
           utter.pitch = gender === "female" ? 1.15 : 0.9;
           const v = pickVoice(gender);
           if (v) utter.voice = v;
+          if (voiceStatus && v) {
+            voiceStatus.textContent = `음성으로 읽는 중입니다... (${gender === "female" ? "여성" : "남성"} / ${v.name})`;
+          }
           utter.onend = () => resolve();
           utter.onerror = () => resolve();
           speechSynthesis.speak(utter);
@@ -704,16 +727,19 @@
         `;
       }
 
-      function renderEnglishWithToggle(en, ko, detailId, sourceLabel = "") {
+      function renderEnglishWithToggle(en, ko, detailId, sourceLabel = "", url = "") {
         const english = String(en ?? "");
         const koLine = String(ko ?? "");
         const ph = phoneticizeEnglish(english);
         const srcHtml = sourceLabel ? `<div class="muted" style="font-weight:800; margin-bottom:4px;">${escapeHtml(sourceLabel)}</div>` : "";
+        const titleHtml = url
+          ? `<a class="headlineLink" target="_blank" rel="noreferrer" href="${escapeHtml(url)}"><div class="headlineEn">${escapeHtml(english)}</div></a>`
+          : `<div class="headlineEn">${escapeHtml(english)}</div>`;
         return `
           <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;">
             <div style="flex:1;">
               ${srcHtml}
-              <div class="headlineEn">${escapeHtml(english)}</div>
+              ${titleHtml}
             </div>
             <button class="transBtn" onclick="event.preventDefault(); event.stopPropagation(); toggleEnglishDetail('${escapeHtml(detailId)}');">
               번역
@@ -735,13 +761,10 @@
 
       function renderTable(title, items) {
         const rows = items
-          .map((m, idx) => {
+          .map((m) => {
             const cls = m.change_pct >= 0 ? "up" : "down";
             const nameVal = String(m.name ?? "");
-            const detailId = `tbl-${title.replace(/[^a-zA-Z0-9_-]/g, "_")}-${idx}`;
-            const nameHtml = /[A-Za-z]/.test(nameVal)
-              ? renderEnglishWithToggle(nameVal, m.name_ko || "", detailId)
-              : escapeHtml(nameVal);
+            const nameHtml = /[A-Za-z]/.test(nameVal) ? escapeHtml(m.name_ko || nameVal) : escapeHtml(nameVal);
             return `
               <tr>
                 <td>${nameHtml}</td>
@@ -789,9 +812,7 @@
                     const src = h.source ? `[출처: ${h.source}]` : "";
                     return `
                       <li>
-                        <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
-                          ${renderEnglishWithToggle(en, ko, detailId, src)}
-                        </a>
+                        ${renderEnglishWithToggle(en, ko, detailId, src, url)}
                       </li>
                     `;
                   })
@@ -809,9 +830,7 @@
             const midDetails = f?.mid_term?.details || "";
             const longDetails = f?.long_term?.details || "";
             const nameVal = String(r.name || r.ticker || "");
-            const nameHtml = /[A-Za-z]/.test(nameVal)
-              ? renderEnglishWithToggle(nameVal, r.name_ko || "", `${baseId}-name-ko`)
-              : escapeHtml(nameVal);
+            const nameHtml = /[A-Za-z]/.test(nameVal) ? escapeHtml(r.name_ko || nameVal) : escapeHtml(nameVal);
 
             return `
               <article class="reason">
@@ -879,9 +898,7 @@
                 const src = h.source ? `[출처: ${h.source}]` : "";
                 return `
                   <li>
-                    <a class="headlineLink" style="flex:1;" target="_blank" rel="noreferrer" href="${escapeHtml(url)}">
-                      ${renderEnglishWithToggle(en, ko, detailId, src)}
-                    </a>
+                    ${renderEnglishWithToggle(en, ko, detailId, src, url)}
                   </li>
                 `;
               })
@@ -889,9 +906,7 @@
           : `<div class="muted">관련 뉴스 없음</div>`;
 
         const nameVal = String(r.name || r.ticker || "");
-        const nameHtml = /[A-Za-z]/.test(nameVal)
-          ? renderEnglishWithToggle(nameVal, r.name_ko || "", `${baseId}-modal-name-ko`)
-          : escapeHtml(nameVal);
+        const nameHtml = /[A-Za-z]/.test(nameVal) ? escapeHtml(r.name_ko || nameVal) : escapeHtml(nameVal);
         document.getElementById("reasonModalTitle").innerHTML = `${nameHtml}<span class="muted" style="font-weight:700; margin-left:8px;">${escapeHtml(
           r.company_type || ""
         )}</span>`;
