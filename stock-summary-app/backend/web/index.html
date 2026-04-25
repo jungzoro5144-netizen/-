@@ -497,6 +497,27 @@
 
       const commonWordPron = {
         love: "러브",
+        nvidia: "엔비디아",
+        tesla: "테슬라",
+        microsoft: "마이크로소프트",
+        alphabet: "알파벳",
+        google: "구글",
+        amazon: "아마존",
+        apple: "애플",
+        meta: "메타",
+        netflix: "넷플릭스",
+        amd: "에이엠디",
+        intel: "인텔",
+        broadcom: "브로드컴",
+        qualcomm: "퀄컴",
+        palantir: "팔란티어",
+        openai: "오픈에이아이",
+        ai: "에이아이",
+        chip: "칩",
+        chips: "칩스",
+        market: "마켓",
+        stock: "스톡",
+        stocks: "스톡스",
         earnings: "어닝스",
         guidance: "가이던스",
         revenue: "리븐뉴",
@@ -521,42 +542,51 @@
         if (commonWordPron[raw] !== undefined) return commonWordPron[raw];
         if (commonWordPron[lower] !== undefined) return commonWordPron[lower];
 
-        const translitToken = (token) => {
-          const cleaned = token.replace(/[^A-Za-z]/g, "");
-          if (!cleaned) return token;
-          const s = cleaned.toLowerCase();
-          if (commonWordPron[s] !== undefined) return commonWordPron[s];
+        const pronounceAcronym = (word) => {
+          const letters = word.toLowerCase().split("");
+          return letters.map((ch) => letterMap[ch] || ch).join("");
+        };
 
-          // 영어 발음에 가까운 한글 표기를 위한 간단한 규칙 기반 변환
-          let t = s
-            .replace(/tion/g, "션")
-            .replace(/sion/g, "전")
-            .replace(/ture/g, "처")
-            .replace(/sure/g, "셔")
-            .replace(/dge/g, "지")
-            .replace(/ch/g, "치")
-            .replace(/sh/g, "쉬")
-            .replace(/th/g, "더")
-            .replace(/ph/g, "프")
-            .replace(/ck/g, "크")
-            .replace(/qu/g, "쿠")
-            .replace(/ng/g, "ㅇ")
-            .replace(/ough/g, "오")
-            .replace(/igh/g, "아이")
-            .replace(/ee/g, "이")
-            .replace(/ea/g, "이")
-            .replace(/oo/g, "우")
-            .replace(/ou/g, "아우")
-            .replace(/oi/g, "오이")
-            .replace(/ow/g, "오우")
-            .replace(/ai/g, "에이")
-            .replace(/ay/g, "에이")
-            .replace(/au/g, "오")
-            .replace(/ar/g, "아")
-            .replace(/or/g, "오")
-            .replace(/er/g, "어")
-            .replace(/ir/g, "어")
-            .replace(/ur/g, "어");
+        const pronounceWord = (word) => {
+          if (!word) return "";
+          const low = word.toLowerCase();
+          if (commonWordPron[word] !== undefined) return commonWordPron[word];
+          if (commonWordPron[low] !== undefined) return commonWordPron[low];
+
+          // 티커처럼 대문자 약어는 알파벳명으로 읽기 (NVDA -> 엔브이디에이)
+          if (/^[A-Z]{2,5}$/.test(word)) return pronounceAcronym(word);
+
+          let w = low;
+          const patterns = [
+            ["tion", "션"],
+            ["sion", "전"],
+            ["ture", "처"],
+            ["sure", "셔"],
+            ["ing", "잉"],
+            ["ed", "드"],
+            ["ph", "프"],
+            ["ch", "치"],
+            ["sh", "시"],
+            ["th", "더"],
+            ["ck", "크"],
+            ["qu", "쿼"],
+            ["ng", "응"],
+            ["ee", "이"],
+            ["ea", "이"],
+            ["oo", "우"],
+            ["ou", "아우"],
+            ["ow", "오우"],
+            ["ai", "에이"],
+            ["ay", "에이"],
+            ["oi", "오이"],
+            ["au", "오"],
+            ["ar", "아"],
+            ["or", "오"],
+            ["er", "어"],
+            ["ir", "어"],
+            ["ur", "어"],
+          ];
+          for (const [a, b] of patterns) w = w.replaceAll(a, b);
 
           const singleMap = {
             a: "애",
@@ -568,7 +598,7 @@
             g: "그",
             h: "ㅎ",
             i: "이",
-            j: "즈",
+            j: "제",
             k: "크",
             l: "ㄹ",
             m: "ㅁ",
@@ -582,33 +612,37 @@
             u: "우",
             v: "브",
             w: "우",
-            x: "크스",
+            x: "엑스",
             y: "이",
             z: "즈",
           };
-          t = t
+          w = w
             .split("")
             .map((ch) => singleMap[ch] || ch)
             .join("");
 
-          // 자주 생기는 어색한 조합 정리 (LOVE -> 러브 류)
-          t = t
-            .replace(/오ㅂ$/g, "오브")
-            .replace(/애ㅂ$/g, "애브")
-            .replace(/어ㅂ$/g, "어브")
-            .replace(/ㅂ$/g, "브")
-            .replace(/ㄹ브/g, "러브")
-            .replace(/ㄹ트/g, "트")
-            .replace(/ㅎ/g, "")
-            .replace(/ㅇ/g, "응")
-            .replace(/ㄹ/g, "르")
-            .replace(/ㅁ/g, "음")
-            .replace(/ㄴ/g, "은")
-            .replace(/\s+/g, " ")
+          // 자모 정리: 어색한 기계음 방지
+          w = w
+            .replaceAll("ㅎ", "")
+            .replaceAll("ㄹ", "르")
+            .replaceAll("ㅁ", "음")
+            .replaceAll("ㄴ", "은")
+            .replaceAll("브브", "브")
+            .replaceAll("크크", "크")
+            .replaceAll("으으", "으")
+            .replaceAll("애애", "애")
             .trim();
+          return w || word;
+        };
 
-          if (t.endsWith("브브")) t = t.slice(0, -1);
-          return t || token;
+        const translitToken = (token) => {
+          const m = token.match(/^([^A-Za-z]*)([A-Za-z][A-Za-z'-]*)([^A-Za-z]*)$/);
+          if (!m) return token;
+          const prefix = m[1] || "";
+          const core = m[2] || "";
+          const suffix = m[3] || "";
+          const pronounced = pronounceWord(core);
+          return `${prefix}${pronounced}${suffix}`;
         };
 
         // 문장/구두점 포함 시 토큰 단위로 처리
