@@ -60,6 +60,32 @@
         font-weight: 900;
         color: #e5e7eb;
       }
+      .indexChartWrap {
+        margin-top: 10px;
+        background: #0b1226;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        padding: 8px 8px 6px;
+      }
+      .indexLegend {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+        font-size: 11px;
+        color: #cbd5e1;
+      }
+      .legendItem {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .legendDot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        display: inline-block;
+      }
       .btn {
         border: 0;
         border-radius: 8px;
@@ -312,30 +338,6 @@
         <button id="btnKR" class="btn active">대한민국</button>
         <button id="btnUS" class="btn">미국</button>
         <button id="btnRefresh" class="btn">새로고침</button>
-      </div>
-      <div style="margin-top:10px; margin-bottom:12px;">
-        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-          <div style="font-weight:900; color:#e5e7eb;">음성 읽기(요약)</div>
-          <label style="color:#cbd5e1; font-weight:700;">
-            성별
-            <select id="voiceGender" style="margin-left:8px; background:#0f172a; color:#e5e7eb; border:1px solid #1f2937; border-radius:10px; padding:6px 10px;">
-              <option value="male">남성</option>
-              <option value="female">여성</option>
-            </select>
-          </label>
-          <label style="color:#cbd5e1; font-weight:700;">
-            속도
-            <select id="voiceRate" style="margin-left:8px; background:#0f172a; color:#e5e7eb; border:1px solid #1f2937; border-radius:10px; padding:6px 10px;">
-              <option value="0.5">0.5배속</option>
-              <option value="1" selected>1배속</option>
-              <option value="1.5">1.5배속</option>
-              <option value="2">2배속</option>
-            </select>
-          </label>
-          <button id="btnSpeak" class="btn" style="background:#1d4ed8;">요약 읽기</button>
-          <button id="btnStop" class="btn" style="background:#1e293b;">정지</button>
-        </div>
-        <div id="voiceStatus" class="muted" style="margin-top:6px; font-weight:600;">음성은 브라우저 기능을 사용합니다.</div>
       </div>
       <div id="content" class="loading">불러오는 중...</div>
     </div>
@@ -941,7 +943,68 @@
       function renderIndexes(indexes) {
         if (!indexRowEl) return;
         const k = indexes?.KOSPI;
+        const kd = indexes?.KOSDAQ;
         const n = indexes?.NASDAQ;
+        const yearColors = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6"];
+
+        function buildLinePoints(months, minV, maxV, width, height, pad) {
+          const innerW = width - pad * 2;
+          const innerH = height - pad * 2;
+          return months
+            .map((v, i) => {
+              const x = pad + (i / 11) * innerW;
+              const ratio = maxV === minV ? 0.5 : (v - minV) / (maxV - minV);
+              const y = pad + (1 - ratio) * innerH;
+              return `${x.toFixed(2)},${y.toFixed(2)}`;
+            })
+            .join(" ");
+        }
+
+        function renderIndexChart(v) {
+          const hist = Array.isArray(v?.history) ? v.history : [];
+          if (!hist.length) return "";
+          const width = 320;
+          const height = 130;
+          const pad = 14;
+          const allVals = hist.flatMap((h) => (h.months || []).map((x) => Number(x || 0))).filter((x) => Number.isFinite(x));
+          const minV = allVals.length ? Math.min(...allVals) : 0;
+          const maxV = allVals.length ? Math.max(...allVals) : 1;
+
+          const monthTicks = ["1", "3", "5", "7", "9", "11", "12"]
+            .map((m, idx) => {
+              const x = pad + ((Number(m) - 1) / 11) * (width - pad * 2);
+              return `<text x="${x.toFixed(1)}" y="${height - 2}" fill="#64748b" font-size="9" text-anchor="middle">${m}월</text>`;
+            })
+            .join("");
+
+          const lines = hist
+            .map((h, idx) => {
+              const pts = buildLinePoints((h.months || []).map((x) => Number(x || 0)), minV, maxV, width, height, pad);
+              return `<polyline fill="none" stroke="${yearColors[idx % yearColors.length]}" stroke-width="2.2" points="${pts}" />`;
+            })
+            .join("");
+
+          const legend = hist
+            .map(
+              (h, idx) =>
+                `<span class="legendItem"><span class="legendDot" style="background:${yearColors[idx % yearColors.length]};"></span>${escapeHtml(
+                  String(h.year)
+                )}년</span>`
+            )
+            .join("");
+
+          return `
+            <div class="indexChartWrap">
+              <svg viewBox="0 0 ${width} ${height}" width="100%" height="130" preserveAspectRatio="none">
+                <rect x="${pad}" y="${pad}" width="${width - pad * 2}" height="${height - pad * 2}" fill="none" stroke="#1f2937" stroke-width="1" />
+                ${lines}
+                ${monthTicks}
+              </svg>
+              <div class="indexLegend">${legend}</div>
+            </div>
+          `;
+        }
+
         const card = (v) => {
           if (!v) return "";
           const cls = Number(v.change_pct || 0) >= 0 ? "up" : "down";
@@ -951,10 +1014,11 @@
               <div class="indexLabel">${escapeHtml(v.label || "")}</div>
               <div class="indexMeta">${escapeHtml(v.ticker || "")}</div>
               <div class="indexValue">${fmtNum(v.close || 0)} <span class="${cls}" style="margin-left:8px;">${pct}</span></div>
+              ${renderIndexChart(v)}
             </div>
           `;
         };
-        indexRowEl.innerHTML = `${card(k)}${card(n)}`;
+        indexRowEl.innerHTML = `${card(k)}${card(kd)}${card(n)}`;
       }
 
       async function load() {
@@ -994,22 +1058,6 @@
       btnKR.addEventListener("click", () => setMarket("KR"));
       btnUS.addEventListener("click", () => setMarket("US"));
       btnRefresh.addEventListener("click", () => load());
-
-      if (btnSpeak) {
-        btnSpeak.addEventListener("click", async () => {
-          const gender = voiceGenderEl?.value || "male";
-          const rate = Number(voiceRateEl?.value || "1");
-          const chunks = buildSpeechText(currentReport, market);
-          await speakSequence(chunks, gender, rate);
-        });
-      }
-
-      if (btnStop) {
-        btnStop.addEventListener("click", () => {
-          if ("speechSynthesis" in window) speechSynthesis.cancel();
-          voiceStatus.textContent = "정지됨";
-        });
-      }
 
       load();
     </script>

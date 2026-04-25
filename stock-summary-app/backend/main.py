@@ -560,9 +560,40 @@ def _reason_ko(m: Move, market: Market) -> Dict[str, object]:
 
 
 def _mock_benchmark_indexes() -> Dict[str, Any]:
+    current_year = datetime.now().year
+
+    def make_history(base: float, slope: float) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for y in [current_year - 2, current_year - 1, current_year]:
+            months: List[float] = []
+            for m in range(1, 13):
+                v = base + slope * (m - 1) + (y - (current_year - 2)) * (slope * 4)
+                months.append(round(v, 2))
+            out.append({"year": y, "months": months})
+        return out
+
     return {
-        "KOSPI": {"label": "코스피", "ticker": "^KS11", "close": 2718.44, "change_pct": 0.62},
-        "NASDAQ": {"label": "나스닥", "ticker": "^IXIC", "close": 18220.34, "change_pct": -0.41},
+        "KOSPI": {
+            "label": "코스피",
+            "ticker": "^KS11",
+            "close": 2718.44,
+            "change_pct": 0.62,
+            "history": make_history(2380.0, 24.0),
+        },
+        "KOSDAQ": {
+            "label": "코스닥",
+            "ticker": "^KQ11",
+            "close": 874.51,
+            "change_pct": -0.33,
+            "history": make_history(760.0, 7.8),
+        },
+        "NASDAQ": {
+            "label": "나스닥",
+            "ticker": "^IXIC",
+            "close": 18220.34,
+            "change_pct": -0.41,
+            "history": make_history(14600.0, 140.0),
+        },
     }
 
 
@@ -579,7 +610,7 @@ def _fetch_benchmark_indexes() -> Dict[str, Any]:
 
     try:
         data = yf.download(
-            tickers=["^KS11", "^IXIC"],
+            tickers=["^KS11", "^KQ11", "^IXIC"],
             period="5d",
             interval="1d",
             auto_adjust=False,
@@ -595,6 +626,8 @@ def _fetch_benchmark_indexes() -> Dict[str, Any]:
         _index_cache = (now, mocked)
         return mocked
 
+    mock = _mock_benchmark_indexes()
+
     def pick(ticker: str, label: str) -> Dict[str, Any]:
         try:
             frame = data[ticker].dropna()
@@ -603,11 +636,74 @@ def _fetch_benchmark_indexes() -> Dict[str, Any]:
             close = float(frame["Close"].iloc[-1])
             prev = float(frame["Close"].iloc[-2])
             pct = (close - prev) / prev * 100
-            return {"label": label, "ticker": ticker, "close": round(close, 2), "change_pct": round(pct, 2)}
+            key = "KOSPI" if ticker == "^KS11" else "KOSDAQ" if ticker == "^KQ11" else "NASDAQ"
+            return {
+                "label": label,
+                "ticker": ticker,
+                "close": round(close, 2),
+                "change_pct": round(pct, 2),
+                "history": mock[key]["history"],
+            }
         except Exception:
-            return _mock_benchmark_indexes()["KOSPI" if ticker == "^KS11" else "NASDAQ"]
+            return mock["KOSPI" if ticker == "^KS11" else "KOSDAQ" if ticker == "^KQ11" else "NASDAQ"]
 
-    result = {"KOSPI": pick("^KS11", "코스피"), "NASDAQ": pick("^IXIC", "나스닥")}
+    # 최근 3개년 월별(1~12월) 데이터
+    monthly_data = None
+    try:
+        monthly_data = yf.download(
+            tickers=["^KS11", "^KQ11", "^IXIC"],
+            period="4y",
+            interval="1mo",
+            auto_adjust=False,
+            group_by="ticker",
+            progress=False,
+            threads=True,
+        )
+    except Exception:
+        monthly_data = None
+
+    def monthly_history(ticker: str, fallback_key: str) -> List[Dict[str, Any]]:
+        if monthly_data is None or len(monthly_data) == 0:
+            return mock[fallback_key]["history"]
+        try:
+            frame = monthly_data[ticker].dropna()
+            if len(frame) == 0:
+                return mock[fallback_key]["history"]
+            # 인덱스가 datetime이라고 가정
+            points: List[Tuple[int, int, float]] = []
+            for idx, row in frame.iterrows():
+                year = int(idx.year)
+                month = int(idx.month)
+                close = float(row["Close"])
+                points.append((year, month, close))
+            years = sorted({p[0] for p in points})
+            if len(years) > 3:
+                years = years[-3:]
+            year_month_close: Dict[int, Dict[int, float]] = {y: {} for y in years}
+            for y, m, c in points:
+                if y in year_month_close:
+                    year_month_close[y][m] = c
+            out: List[Dict[str, Any]] = []
+            for y in years:
+                months: List[float] = []
+                last = None
+                for m in range(1, 13):
+                    if m in year_month_close[y]:
+                        last = year_month_close[y][m]
+                    months.append(round(float(last if last is not None else 0.0), 2))
+                out.append({"year": y, "months": months})
+            return out if out else mock[fallback_key]["history"]
+        except Exception:
+            return mock[fallback_key]["history"]
+
+    result = {
+        "KOSPI": pick("^KS11", "코스피"),
+        "KOSDAQ": pick("^KQ11", "코스닥"),
+        "NASDAQ": pick("^IXIC", "나스닥"),
+    }
+    result["KOSPI"]["history"] = monthly_history("^KS11", "KOSPI")
+    result["KOSDAQ"]["history"] = monthly_history("^KQ11", "KOSDAQ")
+    result["NASDAQ"]["history"] = monthly_history("^IXIC", "NASDAQ")
     _index_cache = (now, result)
     return result
 
@@ -716,8 +812,23 @@ def _build_report(market: Market) -> Dict[str, object]:
     moves = _fetch_moves(universe, market)
 
     top_market_cap = moves[:10]
-    top_gainers = sorted([m for m in moves if m.change_pct > 0], key=lambda x: x.change_pct, reverse=True)[:10]
-    top_losers = sorted([m for m in moves if m.change_pct < 0], key=lambda x: x.change_pct)[:10]
+
+    positives = sorted([m for m in moves if m.change_pct > 0], key=lambda x: x.change_pct, reverse=True)
+    negatives = sorted([m for m in moves if m.change_pct < 0], key=lambda x: x.change_pct)
+    all_desc = sorted(moves, key=lambda x: x.change_pct, reverse=True)
+    all_asc = sorted(moves, key=lambda x: x.change_pct)
+
+    top_gainers = positives[:10]
+    if len(top_gainers) < 10:
+        existing = {m.ticker for m in top_gainers}
+        filler = [m for m in all_desc if m.ticker not in existing][: 10 - len(top_gainers)]
+        top_gainers.extend(filler)
+
+    top_losers = negatives[:10]
+    if len(top_losers) < 10:
+        existing = {m.ticker for m in top_losers}
+        filler = [m for m in all_asc if m.ticker not in existing][: 10 - len(top_losers)]
+        top_losers.extend(filler)
     dedup_moves = {m.ticker: m for m in (top_market_cap + top_gainers + top_losers)}
     reason_map = {ticker: _reason_ko(mv, market) for ticker, mv in dedup_moves.items()}
 
